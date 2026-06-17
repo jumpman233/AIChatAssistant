@@ -30,6 +30,11 @@
 * `docs/rules/frontend-vue.md`：Vue3 前端组件与代码结构规范
 * `docs/rules/chat-flow.md`：聊天、流式响应、停止生成、失败重试的状态流转规则
 
+如果本次涉及前端 UI、Figma 还原、聊天页面视觉或组件实现，还需要阅读：
+
+* `docs/ui/ui-implements.md`：设计稿到项目组件、Nuxt UI 组件的映射关系
+* `docs/ui/photos/`：当前聊天 UI 需求截图，覆盖空会话、正常对话、Streaming、Tool Call、Failed、Aborted、多会话同时 Streaming 等状态
+
 如果文档和代码不一致，以当前代码行为为准；如果本次修改改变了行为，需要同步更新相关文档。
 
 ## 当前必须做

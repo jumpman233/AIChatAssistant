@@ -13,7 +13,10 @@ export default defineNuxtConfig({
   future: {
     compatibilityVersion: 4,
   },
-  modules: [],
+  fonts: {
+    provider: 'local',
+  },
+  modules: ['@nuxt/ui', '@pinia/nuxt'],
   srcDir: 'app',
   typescript: {
     strict: true,

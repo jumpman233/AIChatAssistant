@@ -1,0 +1,22 @@
+{
+  "name": "ai-chat-assistant",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "typecheck": "nuxt typecheck",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.8.0",
+    "nuxt": "^4.4.8"
+  },
+  "devDependencies": {
+    "prisma": "^7.8.0",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.1.5"
+  },
+  "packageManager": "pnpm@10.33.2"
+}

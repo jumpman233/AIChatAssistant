@@ -1,0 +1,118 @@
+```prisma
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ConversationStatus {
+  active
+  archived
+  deleted
+}
+
+enum MessageRole {
+  user
+  assistant
+  tool
+  system
+}
+
+enum MessageStatus {
+  pending
+  streaming
+  done
+  failed
+  aborted
+}
+
+enum ToolCallStatus {
+  pending
+  running
+  success
+  failed
+}
+
+enum ToolSource {
+  local
+  mcp
+}
+
+model Conversation {
+  id        String             @id @default(cuid())
+  title     String?
+  profileId String
+  mode      String             @default("chat")
+  status    ConversationStatus @default(active)
+
+  messages Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([profileId])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+model Message {
+  id              String  @id @default(cuid())
+  conversationId  String
+  parentMessageId String?
+
+  role      MessageRole
+  content   String        @default("")
+  profileId String
+  mode      String        @default("chat")
+  status    MessageStatus @default(pending)
+
+  seq Int
+
+  model        String?
+  errorMessage String?
+  metadata     Json?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  toolCalls    ToolCall[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([conversationId, seq])
+  @@index([conversationId, seq])
+  @@index([status])
+  @@index([profileId])
+  @@index([parentMessageId])
+}
+
+model ToolCall {
+  id        String @id @default(cuid())
+  messageId String
+
+  toolName String
+  source   ToolSource @default(local)
+
+  argumentsJson Json?
+  resultJson    Json?
+
+  status       ToolCallStatus @default(pending)
+  errorMessage String?
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([messageId])
+  @@index([toolName])
+  @@index([status])
+}
+```

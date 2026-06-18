@@ -40,7 +40,9 @@ export const messageRepository = {
           : undefined,
     }
 
-    const orderBy: Prisma.MessageOrderByWithRelationInput[] = params.beforeSeq
+    const shouldReadNewestFirst = params.beforeSeq !== undefined || params.afterSeq === undefined
+
+    const orderBy: Prisma.MessageOrderByWithRelationInput[] = shouldReadNewestFirst
       ? [
           {
             seq: 'desc',
@@ -60,7 +62,7 @@ export const messageRepository = {
     })
 
     const limitedItems = rawItems.slice(0, params.limit)
-    const items = params.beforeSeq ? limitedItems.toReversed() : limitedItems
+    const items = shouldReadNewestFirst ? limitedItems.toReversed() : limitedItems
     const firstSeq = items[0]?.seq ?? null
     const lastSeq = items.at(-1)?.seq ?? null
 

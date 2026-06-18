@@ -23,7 +23,7 @@ type ListConversationsResponse = {
 }
 
 type ListMessagesResponse = {
-  items: unknown[]
+  items: MessageDTO[]
   pageInfo: {
     limit: number
     hasMoreBefore: boolean
@@ -40,6 +40,15 @@ type DeleteConversationResponse = {
 
 type ListProfilesResponse = {
   items: unknown[]
+}
+
+type MessageDTO = {
+  id: string
+  conversationId: string
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: string
+  status: 'pending' | 'streaming' | 'done' | 'failed' | 'aborted'
+  seq: number
 }
 
 const assertInitialConversation = (conversation: ConversationDTO) => {
@@ -89,6 +98,35 @@ const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
   assertEqual(messages.pageInfo.hasMoreAfter, false, 'Expected hasMoreAfter=false')
   assertEqual(messages.pageInfo.beforeSeq, null, 'Expected beforeSeq=null')
   assertEqual(messages.pageInfo.afterSeq, null, 'Expected afterSeq=null')
+
+  await prisma.message.createMany({
+    data: Array.from({ length: 55 }, (_, index) => {
+      const seq = index + 1
+
+      return {
+        content: `seed message ${seq}`,
+        conversationId: created.id,
+        mode: created.mode,
+        profileId: created.profileId,
+        role: 'user',
+        seq,
+        status: 'done',
+      } as const
+    }),
+  })
+
+  const recentMessages = await api.get<ListMessagesResponse>(
+    `/api/conversations/${created.id}/messages?limit=50`,
+  )
+
+  assertEqual(recentMessages.items.length, 50, 'Expected recent messages limit=50')
+  assertEqual(recentMessages.items[0]?.seq, 6, 'Expected first recent message seq=6')
+  assertEqual(recentMessages.items.at(-1)?.seq, 55, 'Expected last recent message seq=55')
+  assertEqual(recentMessages.pageInfo.limit, 50, 'Expected recent pageInfo.limit=50')
+  assertEqual(recentMessages.pageInfo.hasMoreBefore, true, 'Expected hasMoreBefore=true')
+  assertEqual(recentMessages.pageInfo.hasMoreAfter, false, 'Expected hasMoreAfter=false')
+  assertEqual(recentMessages.pageInfo.beforeSeq, 6, 'Expected beforeSeq=6')
+  assertEqual(recentMessages.pageInfo.afterSeq, 55, 'Expected afterSeq=55')
 
   const deleted = await api.delete<DeleteConversationResponse>(`/api/conversations/${created.id}`)
   assertEqual(deleted.id, created.id, 'Expected deleted response id to match')

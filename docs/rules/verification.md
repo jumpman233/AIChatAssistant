@@ -18,21 +18,300 @@
 * V2 以后涉及流式响应的验证必须复用统一 stream client，能够收集 `message_created`、`text_delta`、`tool_call_created`、`tool_call_updated`、`message_done`、`message_failed`，并支持超时和失败时输出原始片段。
 * 涉及数据库断言时，应同时验证 API 行为和数据库状态，尤其是 soft delete、message status、seq、ToolCall status、retry 是否创建新消息、旧消息是否保留。
 
-## 后端测试策略
+## 后端接口与逻辑测试覆盖矩阵
 
-* 不要求为每个 Nuxt server route 编写孤立单测。
-* API 行为优先通过 `tests/harness/scenarios/` 下的真实 API + `TEST_DATABASE_URL` 集成验证覆盖。
-* 单元测试只覆盖低成本、高价值的纯逻辑：
-  * 分页参数处理
-  * DTO 转换
-  * SSE frame 构造 / parser
-  * chat state guard
-  * abort / retry 状态判断
-  * active streaming 判断
-  * ToolCall 参数校验
-  * error response 标准化
-* 不要为了覆盖率 mock Prisma 写大量脆弱测试。
-* 涉及数据库真实状态的验证放到 Harness，不放到 unit test。
+本矩阵直接放在本文档中，作为后端验证策略的主入口。若后续接口和单元测试清单继续膨胀，可以拆到独立测试矩阵文档，再由本文档指路。
+
+### 总原则
+
+1. 不要求为每个 Nuxt server route 编写孤立 route 单测。
+2. API 行为优先通过 `tests/harness/scenarios/` 中的真实 API + `TEST_DATABASE_URL` 集成验证覆盖。
+3. 单元测试只覆盖低成本、高价值、可独立验证的纯逻辑。
+4. Route handler 应保持薄层，只负责：
+   * 读取 request params / body / query
+   * 调用 service
+   * 返回 response
+   * 处理标准错误结构
+5. 复杂逻辑必须下沉到 service / mapper / validator / utils，再写 unit test。
+6. 不要为了覆盖率大量 mock Prisma 写脆弱测试。
+7. 涉及数据库真实状态、Prisma 写入、seq、soft delete、streaming 状态、ToolCall 持久化的验证，应放到 Harness。
+
+### 必须由 Harness 覆盖的接口
+
+以下接口的主要行为通过 Harness 覆盖，不要求额外为 route handler 写孤立单测。
+
+#### Conversation / Message 基础 API
+
+接口：
+
+* `POST /api/conversations`
+* `GET /api/conversations`
+* `GET /api/conversations/:id`
+* `DELETE /api/conversations/:id`
+* `GET /api/conversations/:id/messages`
+* `GET /api/profiles`
+
+对应 Harness：
+
+* `tests/harness/scenarios/conversation.scenario.ts`
+* 命令：`pnpm verify:v1`
+
+必须验证：
+
+* 创建 conversation 成功
+* conversation 列表能查到新会话
+* conversation detail 可读
+* 初始 `ConversationDTO.isStreaming = false`
+* 初始 `ConversationDTO.activeAssistantMessageId = null`
+* `GET /api/conversations/:id/messages?limit=50` 返回 `items=[]`
+* 空消息列表也返回正确 `pageInfo`
+* soft delete 后默认列表不返回 deleted 会话
+* 数据库中 conversation 是 soft delete，不是物理删除
+
+#### Chat Stream API
+
+接口：
+
+* `POST /api/chat`
+
+对应 Harness：
+
+* `tests/harness/scenarios/single-stream.scenario.ts`
+* `tests/harness/scenarios/multi-stream.scenario.ts`
+* 命令：
+  * `pnpm verify:v2`
+  * `pnpm verify:v3`
+
+必须验证：
+
+* 返回 `text/event-stream`
+* 收到 `message_created`
+* 收到至少一个 `text_delta`
+* 正常结束收到 `message_done`
+* stream event 可被统一 `stream-client` 解析
+* user message 和 assistant message 正确落库
+* message `seq` 正确且不重复
+* assistant message 最终 `status = done`
+* 不同 conversation 可以同时 streaming
+* 同一 conversation 已有 active streaming 时再次发送返回 `409 CONVERSATION_STREAMING`
+* `GET /api/conversations` / `GET /api/conversations/:id` 能返回真实 `isStreaming` 和 `activeAssistantMessageId`
+
+#### Abort / Retry API
+
+接口：
+
+* `POST /api/messages/:id/abort`
+* `POST /api/messages/:id/retry`
+
+对应 Harness：
+
+* `tests/harness/scenarios/abort-retry.scenario.ts`
+* 命令：`pnpm verify:v4`
+
+必须验证：
+
+* streaming 中调用 abort 后 message 变为 `aborted`
+* partial content 被保存
+* 已经 `done` 的 message 不能被迟到 abort 覆盖成 `aborted`
+* 原 stream completion 不能把已经 `aborted` 的 message 覆盖成 `done`
+* aborted message 可以 retry
+* failed message 可以 retry
+* done message 不可 retry
+* retry 不覆盖旧 message
+* retry 创建新的 assistant message
+* 新 message 的 `parentMessageId` 指向同一条 user message
+* retry 前如果 conversation 已有 active streaming，返回 `409 CONVERSATION_STREAMING`
+
+#### ToolCall API / ToolCall 流程
+
+如果第一阶段有工具列表接口：
+
+* `GET /api/tools`
+
+其 API 返回结构可由 Harness 或轻量 API check 覆盖；工具调用主链路必须由 Harness 覆盖。
+
+对应 Harness：
+
+* `tests/harness/scenarios/tool-call.scenario.ts`
+* 命令：`pnpm verify:v5`
+
+必须验证：
+
+* mock prompt 可稳定触发 ToolCall
+* stream 中能收到 `tool_call_created`
+* stream 中能收到 `tool_call_updated`
+* ToolCall 记录正确落库
+* ToolCall status 可以从 `running` 变为 `success`
+* 工具失败时 ToolCall status = `failed`
+* ToolCall failed 不应破坏 message 状态机规则
+* calculator / currentTime / mockWeather 至少覆盖成功路径
+* 至少覆盖一个工具失败路径
+
+### 必须由单元测试覆盖的逻辑
+
+以下逻辑应放在 `tests/unit/`，不依赖真实数据库，不 mock Prisma，不通过真实 HTTP 请求验证。
+
+#### Pagination / Message List 逻辑
+
+建议测试文件：
+
+* `tests/unit/pagination.test.ts`
+
+覆盖：
+
+* `limit` 缺省为 50
+* `limit` 最大值限制
+* `beforeSeq` 参数解析
+* `afterSeq` 参数解析
+* `beforeSeq` 和 `afterSeq` 不建议同时使用；如果实现中禁止同时使用，需要测试错误路径
+* 未传 before/after 时表示拉最近 limit 条
+* 返回结果最终按 `seq ASC`
+* `pageInfo.hasMoreBefore`
+* `pageInfo.hasMoreAfter`
+* `pageInfo.beforeSeq`
+* `pageInfo.afterSeq`
+
+#### DTO Mapper 逻辑
+
+建议测试文件：
+
+* `tests/unit/dto-mapper.test.ts`
+
+覆盖：
+
+* ConversationDTO 基础字段映射
+* 无 active assistant message 时：
+  * `isStreaming = false`
+  * `activeAssistantMessageId = null`
+* 有 active assistant message 时：
+  * `isStreaming = true`
+  * `activeAssistantMessageId = <messageId>`
+* MessageDTO 字段映射
+* ToolCallDTO 字段映射
+* 不向前端泄露内部字段
+
+#### Chat State Guard 逻辑
+
+建议测试文件：
+
+* `tests/unit/chat-state.test.ts`
+
+覆盖：
+
+* `pending` / `streaming` 视为 active streaming
+* `done` / `failed` / `aborted` 不视为 active streaming
+* 同 conversation 有 active streaming 时禁止再次 start stream
+* 不同 conversation 的 active streaming 互不影响
+* `streaming` message 可以 abort
+* `pending` message 可以 abort
+* `done` message 不可 abort
+* `failed` message 不可 abort
+* `aborted` message 不可 abort
+* `failed` message 可以 retry
+* `aborted` message 可以 retry
+* `done` message 不可 retry
+* retry 必须创建新 assistant message，不覆盖旧 message
+* abort 后的 message 不得被 stream completion 覆盖成 done
+* done message 不得被迟到 abort 覆盖成 aborted
+
+#### SSE Frame / Parser 逻辑
+
+建议测试文件：
+
+* `tests/unit/sse.test.ts`
+
+覆盖：
+
+* 标准 SSE frame 构造：
+  * `id:`
+  * `event:`
+  * `data:`
+  * 空行结束
+* `event` 和 `data.type` 一致性校验
+* `message_created` event
+* `text_delta` event
+* `tool_call_created` event
+* `tool_call_updated` event
+* `message_done` event
+* `message_failed` event
+* parser 能处理分块 chunk
+* parser 能处理一块里多个 event
+* parser 遇到非法 JSON 时返回可诊断错误
+* parser 失败时能保留原始片段用于调试
+
+#### Error Response 逻辑
+
+建议测试文件：
+
+* `tests/unit/error-response.test.ts`
+
+覆盖：
+
+* 标准 error response 结构
+* `docs/api-contract.md` 中已定义的 error code
+* HTTP status 和 error code 映射一致
+* 未写入 `docs/api-contract.md` 的新 error code，不得仅根据测试文档自行新增；必须先更新 API 契约
+
+错误码名称必须与 `docs/api-contract.md` 保持一致。如果测试矩阵需要新增细分 code，先对齐 `docs/api-contract.md` 后再实现。
+
+#### Tool Registry / Tool Schema 逻辑
+
+建议测试文件：
+
+* `tests/unit/tool-schema.test.ts`
+
+覆盖：
+
+* tool name 唯一
+* tool input schema 校验
+* calculator 参数校验
+* currentTime 参数校验
+* mockWeather 参数校验
+* 工具执行成功返回标准 result
+* 工具执行失败返回标准 error
+* 工具失败不会绕过 ToolCall status 更新规则
+
+#### Mock Stream Control 逻辑
+
+建议测试文件：
+
+* `tests/unit/mock-stream.test.ts`
+
+覆盖：
+
+* 可配置输出延迟
+* 可配置 chunk 数量
+* 可配置指定失败点
+* 可配置触发 tool call
+* 可配置工具成功
+* 可配置工具失败
+* mock / harness 控制参数不应成为真实模型 API 契约
+
+### 不建议编写的测试
+
+除非出现明确复杂逻辑，否则不要为以下内容编写大量孤立 route 单测：
+
+* `server/api/conversations/index.post.ts`
+* `server/api/conversations/index.get.ts`
+* `server/api/conversations/[id].get.ts`
+* `server/api/conversations/[id].delete.ts`
+* `server/api/conversations/[id]/messages.get.ts`
+* `server/api/chat.post.ts`
+* `server/api/messages/[id]/abort.post.ts`
+* `server/api/messages/[id]/retry.post.ts`
+
+这些 route handler 应保持足够薄。其行为由 Harness 覆盖，内部复杂逻辑由 service / mapper / validator / utils 的 unit test 覆盖。
+
+### 允许的例外
+
+如果某个 route handler 出现以下情况，可以补少量 route 单测：
+
+* 参数读取逻辑复杂且无法合理下沉
+* 框架层行为容易出错
+* response header 特别关键，例如 `Content-Type: text/event-stream`
+* 回归 bug 明确发生在 route handler 薄层
+
+即使如此，也应优先考虑把逻辑下沉，而不是扩大 route 单测范围。
 
 ## `verify:mvp` 规则
 

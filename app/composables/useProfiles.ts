@@ -1,5 +1,9 @@
 import type { AssistantProfileDTO } from '~/types/profile'
 
+type ListProfilesResponse = {
+  items: AssistantProfileDTO[]
+}
+
 export const useProfiles = () => {
   const profiles = useState<AssistantProfileDTO[]>('profiles', () => [])
   const currentProfileId = useState<string>('currentProfileId', () => 'general')
@@ -11,7 +15,8 @@ export const useProfiles = () => {
     error.value = null
 
     try {
-      profiles.value = await $fetch<AssistantProfileDTO[]>('/api/profiles')
+      const response = await $fetch<ListProfilesResponse>('/api/profiles')
+      profiles.value = response.items
       if (!profiles.value.some((profile) => profile.id === currentProfileId.value)) {
         currentProfileId.value = profiles.value[0]?.id ?? 'general'
       }

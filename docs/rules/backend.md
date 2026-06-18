@@ -143,3 +143,22 @@ type ApiErrorResponse = {
 ```
 
 不要把 stack trace、API Key、数据库连接信息等敏感信息返回给前端。
+
+## 后端测试边界
+
+后端验证策略以 `docs/rules/verification.md` 为准。
+
+Nuxt server route 不要求逐个编写孤立单测。接口行为、数据库状态和跨层流程优先通过 `tests/harness/scenarios/` 中的真实 API + `TEST_DATABASE_URL` 集成验证覆盖。
+
+单元测试只覆盖低成本、高价值的纯逻辑，例如：
+
+* 分页参数处理
+* DTO 转换
+* SSE frame 构造 / parser
+* chat state guard
+* abort / retry 状态判断
+* active streaming 判断
+* ToolCall 参数校验
+* error response 标准化
+
+不要为了覆盖率 mock Prisma 写大量脆弱测试。涉及数据库真实状态的验证放到 Harness，不放到 unit test。

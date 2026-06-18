@@ -1,5 +1,7 @@
 import { listToolDTOs } from '../tools/registry'
 
 export default defineEventHandler(() => {
-  return listToolDTOs()
+  return {
+    items: listToolDTOs(),
+  }
 })

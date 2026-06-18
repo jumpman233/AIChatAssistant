@@ -42,6 +42,13 @@ V9 Harness 验证版本
 2. 版本稳定后，把关键验证步骤沉淀成可复用 scenario。
 3. 最后 V9 复用 V1-V8 沉淀的流程、工具、断言和关键场景，组织一键 MVP 验收；不要求机械顺序执行所有历史版本命令。
 
+后端测试策略：
+
+- API 行为和数据库真实状态优先沉淀到 `tests/harness/scenarios/`，通过真实 API + `TEST_DATABASE_URL` 覆盖。
+- 单元测试只覆盖分页参数、DTO 转换、SSE frame/parser、chat state guard、abort/retry 判断、active streaming 判断、ToolCall 参数校验、error response 标准化等低成本纯逻辑。
+- 不要求为每个 Nuxt server route 编写孤立单测，不为了覆盖率 mock Prisma 写大量脆弱测试。
+- 具体规则见 `docs/rules/verification.md` 和 `docs/rules/backend.md`。
+
 ---
 
 ## V0：工程基线版本
@@ -874,6 +881,7 @@ Harness 不是重新写一套新验证，而是复用前面每个小版本沉淀
 具体 Harness 规则不在本文档重复定义：
 
 - 验证命令选择、测试数据库、`verify:mvp` 组织方式、复用工具、最终回复要求，见 `docs/rules/verification.md`。
+- 后端测试策略、unit test 与 Harness 的边界，见 `docs/rules/verification.md` 和 `docs/rules/backend.md`。
 - 字段、DTO、SSE event 以 `docs/api-contract.md` 为准。
 - SSE frame、前后端读写、错误边界、abort/retry 竞态、Harness SSE parser 复用规则，以 `docs/architecture/streaming-protocol.md` 为准。
 

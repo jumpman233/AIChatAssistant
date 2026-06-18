@@ -18,6 +18,22 @@
 * V2 以后涉及流式响应的验证必须复用统一 stream client，能够收集 `message_created`、`text_delta`、`tool_call_created`、`tool_call_updated`、`message_done`、`message_failed`，并支持超时和失败时输出原始片段。
 * 涉及数据库断言时，应同时验证 API 行为和数据库状态，尤其是 soft delete、message status、seq、ToolCall status、retry 是否创建新消息、旧消息是否保留。
 
+## 后端测试策略
+
+* 不要求为每个 Nuxt server route 编写孤立单测。
+* API 行为优先通过 `tests/harness/scenarios/` 下的真实 API + `TEST_DATABASE_URL` 集成验证覆盖。
+* 单元测试只覆盖低成本、高价值的纯逻辑：
+  * 分页参数处理
+  * DTO 转换
+  * SSE frame 构造 / parser
+  * chat state guard
+  * abort / retry 状态判断
+  * active streaming 判断
+  * ToolCall 参数校验
+  * error response 标准化
+* 不要为了覆盖率 mock Prisma 写大量脆弱测试。
+* 涉及数据库真实状态的验证放到 Harness，不放到 unit test。
+
 ## `verify:mvp` 规则
 
 * 最终 `verify:mvp` 应复用 V1-V8 已沉淀的流程、工具、断言和关键场景，但不要求机械顺序执行 `verify:v1` 到 `verify:v5` 或所有历史命令。

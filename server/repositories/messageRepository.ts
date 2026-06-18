@@ -8,6 +8,24 @@ export type ListMessagesParams = {
   afterSeq?: number
 }
 
+export type CreateChatMessagesParams = {
+  conversationId: string
+  content: string
+  profileId: string
+  mode: string
+}
+
+export type CompleteAssistantMessageParams = {
+  content: string
+  messageId: string
+}
+
+export type FailAssistantMessageParams = {
+  content: string
+  errorMessage: string
+  messageId: string
+}
+
 const includeToolCalls = {
   toolCalls: {
     orderBy: {
@@ -26,6 +44,64 @@ const hasMessage = (where: Prisma.MessageWhereInput) => {
 }
 
 export const messageRepository = {
+  async createChatMessages(params: CreateChatMessagesParams) {
+    return prisma.$transaction(async (tx) => {
+      const lastMessage = await tx.message.findFirst({
+        orderBy: {
+          seq: 'desc',
+        },
+        select: {
+          seq: true,
+        },
+        where: {
+          conversationId: params.conversationId,
+        },
+      })
+      const userSeq = (lastMessage?.seq ?? 0) + 1
+      const assistantSeq = userSeq + 1
+
+      const userMessage = await tx.message.create({
+        data: {
+          content: params.content,
+          conversationId: params.conversationId,
+          mode: params.mode,
+          profileId: params.profileId,
+          role: 'user',
+          seq: userSeq,
+          status: 'done',
+        },
+        include: includeToolCalls,
+      })
+      const assistantMessage = await tx.message.create({
+        data: {
+          content: '',
+          conversationId: params.conversationId,
+          mode: params.mode,
+          parentMessageId: userMessage.id,
+          profileId: params.profileId,
+          role: 'assistant',
+          seq: assistantSeq,
+          status: 'streaming',
+        },
+        include: includeToolCalls,
+      })
+
+      await tx.conversation.update({
+        data: {
+          updatedAt: new Date(),
+        },
+        where: {
+          id: params.conversationId,
+        },
+      })
+
+      return {
+        assistantMessage,
+        userMessage,
+      }
+    })
+  },
+
   async listByConversation(params: ListMessagesParams) {
     const where: Prisma.MessageWhereInput = {
       conversationId: params.conversationId,
@@ -90,5 +166,33 @@ export const messageRepository = {
       hasMoreBefore: rawItems.length > params.limit || hasMoreBeforeResult !== null,
       items,
     }
+  },
+
+  updateAssistantMessageDone(params: CompleteAssistantMessageParams) {
+    return prisma.message.update({
+      data: {
+        content: params.content,
+        errorMessage: null,
+        status: 'done',
+      },
+      include: includeToolCalls,
+      where: {
+        id: params.messageId,
+      },
+    })
+  },
+
+  updateAssistantMessageFailed(params: FailAssistantMessageParams) {
+    return prisma.message.update({
+      data: {
+        content: params.content,
+        errorMessage: params.errorMessage,
+        status: 'failed',
+      },
+      include: includeToolCalls,
+      where: {
+        id: params.messageId,
+      },
+    })
   },
 }

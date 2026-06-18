@@ -62,3 +62,11 @@ export const notFound = (message: string) =>
     message,
     statusCode: 404,
   })
+
+export const conflict = (message: string, code: ApiErrorCode, details?: unknown) =>
+  createApiError({
+    code,
+    details,
+    message,
+    statusCode: 409,
+  })

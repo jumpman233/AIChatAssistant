@@ -60,6 +60,8 @@ V9 Harness 验证版本
 - `.env.example` 包含必要变量
   - `DATABASE_URL`：开发/业务数据库
   - `TEST_DATABASE_URL`：Harness 专用测试数据库
+- 本地开发库和 Harness 测试库的人工建库教程见 `docs/setup/database.md`
+  - TODO：如果该文件不存在，需要补充独立建库教程，不要在本文档中展开数据库操作细节
 - `AGENTS.md` 和 docs 规则文件已放入仓库
 - Windows / WSL / UTF-8 / LF 等基础工程约束明确
 - Harness 基础 devDependencies 已安装：
@@ -138,10 +140,17 @@ npx prisma generate
   - `GET /api/conversations/:id`
   - `DELETE /api/conversations/:id`
   - `GET /api/conversations/:id/messages`
+    - 支持 `limit` / `beforeSeq` / `afterSeq`
+    - `limit` 默认 `50`
+    - 返回 `pageInfo`
+    - 即使消息为空，也要返回符合 `docs/api-contract.md` 的结构
   - `GET /api/profiles`
 - 会话删除使用软删除：
   - `Conversation.status = deleted`
 - 默认会话列表不返回 `deleted`
+- 初始 `ConversationDTO` 中：
+  - `isStreaming = false`
+  - `activeAssistantMessageId = null`
 
 ### 前端内容
 
@@ -157,6 +166,7 @@ npx prisma generate
   - 创建新会话
   - 切换会话
   - 加载当前会话消息
+  - 首次进入会话时拉取最近 50 条消息，并按 `seq ASC` 渲染
   - 刷新页面后重新加载会话列表
 
 ### 人工验证步骤
@@ -183,7 +193,7 @@ tests/harness/scenarios/conversation.scenario.ts
 1. 调用 `POST /api/conversations` 创建会话
 2. 调用 `GET /api/conversations` 确认会话存在
 3. 调用 `GET /api/conversations/:id` 确认详情可读
-4. 调用 `GET /api/conversations/:id/messages` 确认初始消息列表为空
+4. 调用 `GET /api/conversations/:id/messages?limit=50` 确认初始消息列表为空，且 `pageInfo` 结构符合契约
 5. 调用 `DELETE /api/conversations/:id`
 6. 再次调用 `GET /api/conversations`，确认默认列表不返回 deleted 会话
 7. 查询数据库，确认会话是软删除
@@ -213,6 +223,9 @@ pnpm verify:v1
 ### 后端内容
 
 - 实现 `POST /api/chat`
+- 流式协议已确定使用标准 SSE
+  - 字段、DTO、SSE event 以 `docs/api-contract.md` 为准
+  - SSE frame、前后端读写、错误边界、abort/retry 竞态以 `docs/architecture/streaming-protocol.md` 为准
 - 只使用 mock stream，不接真实模型
 - 请求参数：
   - `conversationId`
@@ -329,6 +342,9 @@ HTTP 状态码：
 
 - 不使用全局 streaming 锁
 - 不同 conversationId 的 `/api/chat` 请求互不影响
+- `GET /api/conversations` 和 `GET /api/conversations/:id` 需要根据 active assistant message 返回真实的：
+  - `isStreaming`
+  - `activeAssistantMessageId`
 
 ### 前端内容
 
@@ -585,6 +601,8 @@ pnpm verify:v5
 
 ### 前端内容
 
+具体 UI 交互、滚动、输入框、历史消息加载、失败、停止、重试、多页面行为，以 `docs/ui/interaction-rules.md` 为准。本文档只保留本阶段要完成的能力和验证重点，不重复定义完整交互规则。
+
 根据 `docs/ui/ui-implements.md` 和 `docs/ui/photos/` 实现或完善：
 
 - ChatPage
@@ -676,18 +694,16 @@ pnpm e2e:ui
 
 ### 前端内容
 
+具体 UI 交互、滚动、输入框、历史消息加载、失败、停止、重试、多页面行为，以 `docs/ui/interaction-rules.md` 为准。本文档只保留本阶段要完成的能力和验证重点，不重复定义完整交互规则。
+
 - Markdown 渲染
 - 代码块渲染
 - 代码块语言标识
 - 代码复制按钮
 - Toast / Alert
 - 空状态示例问题
-- 自动滚动策略：
-  - 用户接近底部时自动滚动
-  - 用户手动上滑时不强制滚动
-- 输入快捷键：
-  - Enter 发送
-  - Shift + Enter 换行
+- 自动滚动策略按 `docs/ui/interaction-rules.md` 实现
+- 输入快捷键按 `docs/ui/interaction-rules.md` 实现
 - loading / disabled / failed / aborted 细节优化
 
 ### 人工验证步骤
@@ -832,13 +848,13 @@ pnpm e2e:markdown
 pnpm verify:mvp
 ```
 
-Harness 不是重新写一套新验证，而是复用前面每个小版本沉淀出来的流程、工具、测试数据和关键断言。
+Harness 不是重新写一套新验证，而是复用前面每个小版本沉淀出来的流程、工具、测试数据、关键断言和 scenario。
 
-`verify:mvp` 不需要机械执行 `verify:v1` 到 `verify:v5`。推荐做法是运行一个更高层的 `mvp-full-flow.scenario.ts`，在完整业务流中复用已有 `api-client`、`stream-client`、`db-assert` 和关键断言，再叠加必要的 E2E。
+`verify:mvp` 不需要机械执行 `verify:v1` 到 `verify:v5`。推荐定位是一个更高层的完整 MVP 验收入口：复用已有 `api-client`、`stream-client`、`db-assert`、测试数据、关键断言和必要 E2E，覆盖 MVP 主链路。
 
 ---
 
-### Harness 覆盖范围
+### Harness 覆盖范围摘要
 
 至少覆盖：
 
@@ -853,241 +869,13 @@ Harness 不是重新写一套新验证，而是复用前面每个小版本沉淀
 - UI E2E
 - Markdown / CodeBlock 基础展示
 
----
+### Harness 规则引用
 
-### 推荐目录结构
+具体 Harness 规则不在本文档重复定义：
 
-```text
-tests/
-  harness/
-    setup/
-      reset-test-db.ts
-      seed-test-data.ts
-      start-test-server.ts
-
-    scenarios/
-      conversation.scenario.ts
-      single-stream.scenario.ts
-      multi-stream.scenario.ts
-      abort-retry.scenario.ts
-      tool-call.scenario.ts
-      mvp-full-flow.scenario.ts
-
-    utils/
-      api-client.ts
-      stream-client.ts
-      db-assert.ts
-      wait.ts
-      test-data.ts
-
-    reports/
-
-  e2e/
-    ui-states.spec.ts
-    markdown-codeblock.spec.ts
-```
-
----
-
-### 推荐脚本
-
-```json
-{
-  "scripts": {
-    "verify:base": "pnpm typecheck && npx prisma generate",
-    "verify:v1": "tsx tests/harness/scenarios/conversation.scenario.ts",
-    "verify:v2": "tsx tests/harness/scenarios/single-stream.scenario.ts",
-    "verify:v3": "tsx tests/harness/scenarios/multi-stream.scenario.ts",
-    "verify:v4": "tsx tests/harness/scenarios/abort-retry.scenario.ts",
-    "verify:v5": "tsx tests/harness/scenarios/tool-call.scenario.ts",
-    "e2e:ui": "playwright test tests/e2e/ui-states.spec.ts",
-    "e2e:markdown": "playwright test tests/e2e/markdown-codeblock.spec.ts",
-    "verify:mvp": "pnpm verify:base && tsx tests/harness/scenarios/mvp-full-flow.scenario.ts && pnpm e2e:ui && pnpm e2e:markdown"
-  }
-}
-```
-
-可根据项目实际测试工具调整，不要求一开始全部建好。
-
-约定：
-
-- Harness scenario 使用 `tsx` 执行 TypeScript 脚本。
-- UI / Markdown E2E 使用 Playwright。
-- `verify:v1` 到 `verify:v5` 是定向回归入口，用于开发中快速定位某个小版本能力；`verify:mvp` 不需要机械调用它们。
-
----
-
-### 测试数据库要求
-
-必须使用测试数据库，不要直接打开发库或线上库。
-
-建议环境变量：
-
-```text
-DATABASE_URL=开发数据库
-TEST_DATABASE_URL=测试数据库
-```
-
-数据库切换策略：
-
-- 业务开发、本地 `pnpm dev` 和普通脚本默认使用 `DATABASE_URL`。
-- Harness 不修改 `.env` 文件，不把 `TEST_DATABASE_URL` 写回 `DATABASE_URL`。
-- Harness 启动测试服务或执行 Prisma 命令时，只在子进程环境变量中临时覆盖：
-
-```text
-DATABASE_URL = TEST_DATABASE_URL
-TEST_DATABASE_URL = 原 TEST_DATABASE_URL
-```
-
-- 因为 `prisma.config.ts` 默认读取 `DATABASE_URL`，所以 Harness 执行 migration / Prisma 脚本时必须通过子进程 env 覆盖，让 Prisma 实际连接测试库。
-- Harness 结束后子进程退出，开发进程和 `.env` 不变，自然回到业务数据库。
-- Harness 必须在启动前校验 `TEST_DATABASE_URL` 存在，且与 `DATABASE_URL` 不完全相同。
-- 建议测试库使用独立 database 名称，例如 `ai_chat_assistant_test`，不要只依赖同库不同 schema 来隔离高风险操作。
-
-Harness 启动时：
-
-1. 读取 `TEST_DATABASE_URL`
-2. 确认目标是测试数据库，且不等于 `DATABASE_URL`
-3. 自动执行 migration
-4. 使用温和 reset 清理测试数据
-5. seed 必要数据
-6. 跑 scenario
-7. 清理测试数据
-
-要求：
-
-- Harness 不访问生产数据库
-- Harness 不删除开发数据库数据
-- reset 操作必须只作用于测试数据库
-- 如果没有配置 `TEST_DATABASE_URL`，Harness 应直接失败，不允许 fallback 到 `DATABASE_URL`
-- 测试脚本允许自动执行 migration，但只能作用于 `TEST_DATABASE_URL`
-- 默认使用温和 reset：按外键依赖顺序清空业务表、重置必要序列或使用事务隔离测试数据，不默认 drop schema / drop database
-- `prisma migrate reset` 会删除并重建 schema、重新执行 migration 和 seed，破坏性更强；除非明确确认，否则 Harness 不应默认使用
-
----
-
-### Stream Client 要求
-
-流式协议暂定使用 SSE：
-
-```text
-event: text_delta
-data: {"messageId":"xxx","delta":"hello"}
-
-```
-
-执行 V2 stream 实现前需要再次确认并敲定最终协议。敲定后，后端 `/api/chat`、前端 stream parser 和 Harness `stream-client` 必须使用同一协议。
-
-流式测试必须封装通用工具：
-
-```ts
-readChatStream(response): Promise<ChatStreamEvent[]>
-```
-
-职责：
-
-- 读取 `ReadableStream`
-- 按项目 stream 协议解析 event
-- 收集：
-  - `message_created`
-  - `text_delta`
-  - `tool_call_created`
-  - `tool_call_updated`
-  - `message_done`
-  - `message_failed`
-- 支持超时
-- 支持中断
-- 失败时输出原始片段，便于定位
-
-V2、V3、V4、V5 都应该复用这个 `stream-client`。
-
-Mock stream 需要提供可控测试能力，用于 Harness 稳定制造场景，例如：
-
-- 输出延迟
-- chunk 数量
-- 指定失败点
-- 指定触发 tool call
-- 指定工具成功或失败
-
-这些控制入口仅用于 mock / harness，不代表真实模型 API 契约。
-
----
-
-### API Client 要求
-
-建议封装：
-
-```ts
-createConversation()
-listConversations()
-getConversation(id)
-deleteConversation(id)
-listMessages(conversationId)
-sendChatStream(payload)
-abortMessage(messageId, content)
-retryMessage(messageId)
-```
-
-避免每个 scenario 重复写 fetch 细节。
-
----
-
-### DB Assert 要求
-
-建议封装：
-
-```ts
-assertConversationExists(id)
-assertConversationDeleted(id)
-assertMessageStatus(id, status)
-assertConversationMessages(conversationId)
-assertToolCallStatus(id, status)
-```
-
-验证应同时看 API 结果和数据库结果，尤其是：
-
-- soft delete
-- message status
-- seq
-- ToolCall status
-- retry 是否创建新消息
-- 旧消息是否保留
-
----
-
-### MVP Full Flow 场景
-
-建议沉淀为：
-
-```text
-tests/harness/scenarios/mvp-full-flow.scenario.ts
-```
-
-完整流程：
-
-1. reset test db
-2. 创建 Conversation A
-3. 发送普通消息
-4. 读取 stream，断言 message done
-5. 发送第二条消息
-6. 中途 abort
-7. 断言 message aborted 且 partial content 保留
-8. retry aborted message
-9. 断言旧消息保留，新消息 done
-10. 触发 ToolCall
-11. 断言 ToolCall success
-12. 创建 Conversation B
-13. A、B 同时 streaming
-14. A 同会话重复发送返回 409
-15. 刷新式查询 messages，断言数据可恢复
-16. soft delete Conversation B
-17. 断言列表不返回 B，数据库中 B 为 deleted
-
-Abort 权威状态规则：
-
-- `POST /api/messages/:id/abort` 写入的 `aborted` 是最终权威状态。
-- 如果原 stream 流程稍后尝试写入 `done`，不得覆盖已经 `aborted` 的 message。
-- 后端 service 层必须做状态保护，避免 abort / stream completion 竞争导致状态回退。
+- 验证命令选择、测试数据库、`verify:mvp` 组织方式、复用工具、最终回复要求，见 `docs/rules/verification.md`。
+- 字段、DTO、SSE event 以 `docs/api-contract.md` 为准。
+- SSE frame、前后端读写、错误边界、abort/retry 竞态、Harness SSE parser 复用规则，以 `docs/architecture/streaming-protocol.md` 为准。
 
 ---
 

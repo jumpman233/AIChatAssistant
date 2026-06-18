@@ -18,25 +18,68 @@
 * PostgreSQL
 * Vercel AI SDK 或兼容模型 SDK
 
-## 工作前必须阅读
+## 文档索引与优先级
 
-在进行非简单修改前，请先阅读：
+处理需求、架构、API、聊天状态、SSE、前端 UI、交互规则、测试 Harness 相关任务前，必须先阅读对应文档。
 
-* `docs/requirements.md`：需求范围、当前阶段目标、明确不做的内容
-* `docs/data-model.md`：数据库结构说明
-* `prisma/schema.prisma`：数据库结构真实来源
-* `docs/api-contract.md`：后端接口契约
-* `docs/rules/backend.md`：后端代码结构与接口规范
-* `docs/rules/frontend-vue.md`：Vue3 前端组件与代码结构规范
-* `docs/rules/chat-flow.md`：聊天、流式响应、停止生成、失败重试的状态流转规则
-* `docs/progress-guideline.md`：MVP 前可验证小版本计划、Harness 场景沉淀和验收节奏
+### 基础需求与数据
 
-如果本次涉及前端 UI、Figma 还原、聊天页面视觉或组件实现，还需要阅读：
+* `docs/requirements.md`：项目需求、MVP 边界、明确不做的内容。
+* `docs/data-model.md`：数据模型说明。
+* `prisma/schema.prisma`：数据库结构的真实来源。
 
-* `docs/ui/ui-implements.md`：设计稿到项目组件、Nuxt UI 组件的映射关系
-* `docs/ui/photos/`：当前聊天 UI 需求截图，覆盖空会话、正常对话、Streaming、Tool Call、Failed、Aborted、多会话同时 Streaming 等状态
+### API 与流式协议
 
-如果文档和代码不一致，以当前代码行为为准；如果本次修改改变了行为，需要同步更新相关文档。
+* `docs/api-contract.md`：前后端 API 契约、DTO、错误结构、SSE event 字段定义。涉及接口和字段时优先看它。
+* `docs/architecture/streaming-protocol.md`：标准 SSE 协议实现细节、后端写流、前端读流、错误边界、abort/retry 竞态、Harness parser 复用规则。
+* `docs/rules/chat-flow.md`：聊天状态机规则，包括 streaming、failed、aborted、retry、ToolCall、seq、多会话并发。
+
+聊天相关实现的优先级：
+
+```text
+docs/api-contract.md
+> docs/architecture/streaming-protocol.md
+> docs/rules/chat-flow.md
+> docs/architecture/chat-flow-diagrams.md
+```
+
+如果这些文档有冲突，按上面的优先级处理，并在回复中说明冲突点，不要自行猜测。
+
+### 架构图与流程图
+
+* `docs/architecture/chat-flow-diagrams.md`：聊天主流程、发送消息、SSE 事件处理、停止、重试、ToolCall、多会话、多页面、历史消息加载、Harness 复用的 Mermaid 图。该文档用于理解流程，不作为字段和接口的最高优先级定义。
+
+### 前端规范与交互
+
+* `docs/rules/frontend-vue.md`：Vue 3、Pinia、Nuxt UI、Tailwind、组件职责、Store/Composable 分工规范。
+* `docs/ui/interaction-rules.md`：UI 交互规则，包括历史消息加载、滚动行为、输入框、停止、失败、重试、ToolCall、多会话、多页面行为。
+* `docs/ui/ui-implements.md`：Figma 设计稿到项目组件、Nuxt UI 组件的映射关系。
+* `docs/ui/photos/`：当前 UI 状态截图，包括空会话、正常对话、Streaming、ToolCall、Failed、Aborted、多会话 Streaming。
+
+实现 UI 时优先级：
+
+```text
+状态正确
+> 流式稳定
+> 组件清晰
+> 视觉还原
+```
+
+### 后端规范
+
+* `docs/rules/backend.md`：后端接口、service、repository、Prisma、错误处理、工具调用等实现规范。
+
+### MVP 版本与验证
+
+* `docs/rules/verification.md`：开发验证、Harness、测试数据库、验证命令选择、最终验收规则。
+* `docs/progress-guideline.md`：MVP 前可验证小版本、每阶段验证步骤、最终 Harness 设计。
+
+如果文档和当前代码不一致：
+
+* 对于理解现有实现，以当前代码行为为准。
+* 对于本次要实现的新行为，以对应需求文档、API 契约和规则文档为准。
+* 如果本次修改改变了代码行为，需要同步更新相关文档。
+* 如果发现文档之间或文档与代码之间存在冲突，不要自行猜测，先在回复中说明冲突点和建议处理方式。
 
 ## 当前必须做
 
@@ -130,55 +173,30 @@ API 文件只负责：
 * 修改接口行为时，同步更新 `docs/api-contract.md`
 * 修改聊天状态流转时，同步更新 `docs/rules/chat-flow.md`
 
+## 修改约束
+
+* 不要在未阅读对应文档的情况下实现聊天、SSE、abort、retry、ToolCall、多会话 streaming、历史消息加载、UI 交互或 Harness。
+* 涉及 API 字段时，以 `docs/api-contract.md` 为准。
+* 涉及 SSE 实现时，以 `docs/architecture/streaming-protocol.md` 为准。
+* 涉及聊天状态机时，以 `docs/rules/chat-flow.md` 为准。
+* 涉及前端组件、Store、Composable 时，以 `docs/rules/frontend-vue.md` 为准。
+* 涉及用户交互、滚动、历史消息加载、输入框状态时，以 `docs/ui/interaction-rules.md` 为准。
+* 涉及 Figma 还原时，同时参考 `docs/ui/ui-implements.md` 和 `docs/ui/photos/`。
+* 流程图只用于辅助理解；不要用流程图覆盖 API 契约或状态机规则。
+
 ## 验证要求
 
-开发验证必须服务于最终 Harness 验收，不要在最后重新设计一套验收流程。
+详细验证规则见：
 
-默认节奏：
+* `docs/rules/verification.md`：开发验证、Harness、测试数据库、验证命令选择、最终验收规则。
+* `docs/progress-guideline.md`：MVP 小版本节奏和各阶段应沉淀的验证场景。
 
-* 按 `docs/progress-guideline.md` 的 V0-V9 小版本推进，每次只验证当前任务涉及的最小闭环。
-* 每个版本先用人工步骤确认行为，再把稳定的关键步骤沉淀成可复用 Harness scenario 或 E2E spec。
-* 新增验证脚本时，优先复用既有 `tests/harness/utils/` 中的 api-client、stream-client、db-assert、wait、test-data 等工具，不要为每个场景复制 fetch、stream 解析或数据库断言逻辑。
-* V2 以后涉及流式响应的验证必须复用统一 stream client，能够收集 `message_created`、`text_delta`、`tool_call_created`、`tool_call_updated`、`message_done`、`message_failed`，并支持超时和失败时输出原始片段。
-* 涉及数据库断言时，应同时验证 API 行为和数据库状态，尤其是 soft delete、message status、seq、ToolCall status、retry 是否创建新消息、旧消息是否保留。
-* 最终 `verify:mvp` 应复用 V1-V8 已沉淀的流程、工具、断言和关键场景，但不要求机械顺序执行 `verify:v1` 到 `verify:v5` 或所有历史命令。
-* `verify:mvp` 可以组织为更高层的完整 MVP flow，只要它复用了前面积累的 api-client、stream-client、db-assert、测试数据和关键断言，且覆盖最终验收所需行为即可。
-* 不要为了“复用”而重复跑低价值、重复初始化或互相冲突的历史场景；也不要在 V9 另起一套与前面验证逻辑无关的全新验收实现。
+执行规则：
 
-Harness 数据库要求：
-
-* Harness 必须使用测试数据库，读取 `TEST_DATABASE_URL`。
-* 不允许 Harness fallback 到 `DATABASE_URL`。
-* 如果没有配置 `TEST_DATABASE_URL`，Harness 必须直接失败。
-* Harness 不修改 `.env`；需要连接测试库时，只能在测试子进程环境变量中临时将 `DATABASE_URL` 覆盖为 `TEST_DATABASE_URL`。
-* reset / seed / cleanup 只能作用于测试数据库，不允许删除开发库或线上库数据。
-* 涉及 reset test db、migration、seed 的脚本必须把目标数据库来源写清楚，避免误操作。
-
-完成代码修改后，根据改动范围尽量运行相关命令，而不是机械跑全部命令：
-
-```bash
-pnpm verify:base
-pnpm verify:v1
-pnpm verify:v2
-pnpm verify:v3
-pnpm verify:v4
-pnpm verify:v5
-pnpm e2e:ui
-pnpm e2e:markdown
-pnpm verify:mvp
-pnpm lint
-pnpm typecheck
-pnpm test
-```
-
-当前阶段命令可能尚未全部存在。若命令不存在、依赖未安装、服务未启动、数据库未配置或无法运行，需要明确说明原因；不要声称已测试但实际没有运行。
-
-最终回复中必须说明：
-
-* 实际运行了哪些验证命令。
-* 哪些命令没有运行以及原因。
-* 本次新增或修改的人工验证步骤是否已经沉淀为可复用 Harness scenario / E2E spec；如果还没有，需要说明后续应沉淀到哪个文件或命令。
-* 本次验证是否满足 `docs/progress-guideline.md` 中对应小版本的要求。
+* 根据改动范围选择最小有效验证，不要机械跑全部命令。
+* 不要声称运行过未实际运行的验证。
+* Harness 必须使用 `TEST_DATABASE_URL`，不得 fallback 到 `DATABASE_URL`。
+* 最终回复必须说明实际运行的验证、未运行的验证及原因。
 
 ## 其他
 

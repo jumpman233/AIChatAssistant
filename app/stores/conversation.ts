@@ -22,6 +22,7 @@ export const useConversationStore = defineStore('conversation', () => {
   const conversations = ref<ConversationDTO[]>([])
   const error = ref<string | null>(null)
   const messagesByConversationId = ref<Record<string, MessageDTO[]>>({})
+  const messagesPending = ref(false)
   const pending = ref(false)
 
   const activeConversation = computed(() => {
@@ -40,7 +41,7 @@ export const useConversationStore = defineStore('conversation', () => {
   const setMessages = (conversationId: string, messages: MessageDTO[]) => {
     messagesByConversationId.value = {
       ...messagesByConversationId.value,
-      [conversationId]: messages,
+      [conversationId]: [...messages].sort((a, b) => a.seq - b.seq),
     }
   }
 
@@ -50,8 +51,10 @@ export const useConversationStore = defineStore('conversation', () => {
 
     try {
       const response = await $fetch<ListConversationsResponse>('/api/conversations')
-      conversations.value = response.items
-      return response.items
+      conversations.value = response.items.filter(
+        (conversation) => conversation.status !== 'deleted',
+      )
+      return conversations.value
     } catch {
       error.value = '会话列表加载失败'
       return []
@@ -61,16 +64,26 @@ export const useConversationStore = defineStore('conversation', () => {
   }
 
   const loadMessages = async (conversationId: string) => {
-    const response = await $fetch<ListMessagesResponse>(
-      `/api/conversations/${conversationId}/messages`,
-      {
-        query: {
-          limit: 50,
+    messagesPending.value = true
+    error.value = null
+
+    try {
+      const response = await $fetch<ListMessagesResponse>(
+        `/api/conversations/${conversationId}/messages`,
+        {
+          query: {
+            limit: 50,
+          },
         },
-      },
-    )
-    setMessages(conversationId, response.items)
-    return response.items
+      )
+      setMessages(conversationId, response.items)
+      return messagesByConversationId.value[conversationId] ?? []
+    } catch {
+      error.value = '消息加载失败'
+      return []
+    } finally {
+      messagesPending.value = false
+    }
   }
 
   const selectConversation = async (conversationId: string) => {
@@ -90,7 +103,10 @@ export const useConversationStore = defineStore('conversation', () => {
         method: 'POST',
       })
 
-      conversations.value = [conversation, ...conversations.value]
+      conversations.value = [
+        conversation,
+        ...conversations.value.filter((item) => item.id !== conversation.id),
+      ]
       await selectConversation(conversation.id)
       return conversation
     } catch {
@@ -153,6 +169,7 @@ export const useConversationStore = defineStore('conversation', () => {
     loadConversations,
     loadMessages,
     messagesByConversationId,
+    messagesPending,
     pending,
     selectConversation,
     setMessages,

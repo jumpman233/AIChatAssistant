@@ -7,7 +7,7 @@ const { currentProfileId, error, pending, profiles } = storeToRefs(profileStore)
 
 <template>
   <label class="profile-switcher">
-    <span>Profile</span>
+    <span class="profile-switcher__eyebrow">Profile</span>
     <select v-model="currentProfileId" :disabled="pending || profiles.length === 0">
       <option
         v-for="profile in profiles"
@@ -24,24 +24,31 @@ const { currentProfileId, error, pending, profiles } = storeToRefs(profileStore)
 <style scoped>
 .profile-switcher {
   display: grid;
-  gap: 6px;
-  min-width: 220px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profile-switcher__eyebrow {
   color: var(--color-muted);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 select {
-  min-height: 40px;
+  width: 100%;
+  min-height: 38px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--color-panel);
   color: var(--color-text);
-  padding: 0 10px;
+  padding: 0 12px;
+  font-weight: 800;
 }
 
 small {
   color: var(--color-danger);
-  font-weight: 500;
+  font-size: 12px;
 }
 </style>

@@ -1,79 +1,83 @@
 <script setup lang="ts">
-const props = defineProps<{
+defineProps<{
   disabled?: boolean
-}>()
-
-const emit = defineEmits<{
-  send: [content: string]
+  reason?: string
 }>()
 
 const draft = ref('')
-
-const send = () => {
-  const content = draft.value.trim()
-
-  if (!content || props.disabled) {
-    return
-  }
-
-  emit('send', content)
-  draft.value = ''
-}
 </script>
 
 <template>
-  <form class="message-input" @submit.prevent="send">
+  <section class="message-input" aria-label="消息输入区">
     <textarea
       v-model="draft"
       :disabled="disabled"
-      placeholder="输入消息..."
-      rows="3"
-      @keydown.enter.exact.prevent="send"
+      placeholder="输入消息，V2 将支持发送"
+      rows="4"
     />
-    <button :disabled="disabled || draft.trim().length === 0" type="submit">
-      发送
-    </button>
-  </form>
+    <div class="message-input__footer">
+      <span>{{ reason ?? 'V1 仅支持会话与历史消息读取，不发送消息。' }}</span>
+      <button disabled type="button">
+        V2 支持发送
+      </button>
+    </div>
+  </section>
 </template>
 
 <style scoped>
 .message-input {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 16px;
   border-top: 1px solid var(--color-border);
   background: var(--color-panel);
+  padding: 20px 28px;
 }
 
 textarea {
-  width: 100%;
-  min-height: 72px;
+  display: block;
+  width: min(100%, 980px);
+  min-height: 112px;
+  margin: 0 auto;
   resize: vertical;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
   color: var(--color-text);
+  padding: 16px;
+  line-height: 1.6;
+}
+
+textarea:disabled {
+  color: var(--color-muted);
+}
+
+.message-input__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 980px);
+  margin: 12px auto 0;
+  gap: 14px;
+  color: var(--color-muted);
+  font-size: 13px;
 }
 
 button {
-  align-self: end;
-  min-height: 42px;
+  min-height: 38px;
   border: 0;
-  border-radius: 6px;
-  background: var(--color-primary);
+  border-radius: 999px;
+  background: #111827;
   color: #fff;
   padding: 0 18px;
-  font-weight: 700;
+  font-weight: 800;
 }
 
-button:hover:not(:disabled) {
-  background: var(--color-primary-strong);
-}
-
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .message-input {
-    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  .message-input__footer {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   button {

@@ -262,6 +262,11 @@ pnpm verify:v1
 - 输入框可发送消息
 - 前端解析 stream event
 - 实时追加 assistant 内容
+- 实现基础 typewriter display buffer
+- 区分 `rawContent` / `displayContent` / `pendingText`
+- `text_delta` 不直接整段跳出，而是通过 typewriter 节奏展示
+- streaming 中使用 `markdown-it` 做基础 Markdown 渲染
+- 实现 `normalizeStreamingMarkdown`，至少支持未闭合代码块临时闭合
 - 消息结束后状态变成 `done`
 - 当前会话生成中时，输入框禁用或展示“正在生成”
 
@@ -314,6 +319,10 @@ pnpm verify:v2
 - 不做失败重试
 - 不做工具调用
 - 不接真实模型
+- 不做完整代码高亮
+- 不做代码复制按钮
+- 不做复杂表格优化
+- 不做 Nuxt Content / MDC 聊天消息渲染
 
 ---
 
@@ -705,8 +714,12 @@ pnpm e2e:ui
 
 - Markdown 渲染
 - 代码块渲染
+- 完整代码块高亮
 - 代码块语言标识
 - 代码复制按钮
+- 表格优化
+- done 后最终 Markdown 渲染体验优化
+- streaming 中 Markdown 抖动优化
 - Toast / Alert
 - 空状态示例问题
 - 自动滚动策略按 `docs/ui/interaction-rules.md` 实现

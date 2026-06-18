@@ -237,6 +237,50 @@ app/
 
 ---
 
+## 打字机输出与 Streaming Markdown 实现规范
+
+`MarkdownRenderer` 组件建议使用 `markdown-it` 作为第一阶段 Markdown 渲染方案。
+
+`MarkdownRenderer` 只负责渲染传入的 `content`，不直接读取 SSE，不直接管理 stream，不直接感知 `AbortController`、retry、ToolCall 或 conversation runtime。
+
+打字机状态不应放在 `MessageItem` 内部。`MessageItem` 只根据 message 和 runtime 派生出来的可见内容展示 UI，不创建、不持有、不清理 typewriter timer。
+
+推荐职责：
+
+* `useChatStream`：读取 SSE、接收 `text_delta`、驱动 typewriter buffer。
+* `chatRuntimeStore`：保存 streaming runtime / typewriter buffer。
+* `conversationStore`：保存会话和消息数据。
+* `MessageItem`：根据 message + runtime `displayContent` 展示内容。
+* `MarkdownRenderer`：渲染 `renderContent`。
+
+建议 typewriter runtime state 至少包含：
+
+```ts
+type TypewriterRuntimeState = {
+  messageId: string
+  rawContent: string
+  displayContent: string
+  pendingText: string
+  isTyping: boolean
+  timerId: ReturnType<typeof setTimeout> | null
+}
+```
+
+推荐渲染链路：
+
+```ts
+const visibleContent = runtime.displayContent ?? message.content
+const renderContent = normalizeStreamingMarkdown(visibleContent, isStreaming)
+```
+
+然后将 `renderContent` 传给 `MarkdownRenderer`。
+
+`normalizeStreamingMarkdown` 只用于渲染，不得写回 store 中的 message content，不得写入数据库，不得改变 SSE event data。
+
+V2 先实现基础 Markdown + 临时代码块闭合；V7 再优化代码高亮、复制按钮、表格等完整阅读体验。
+
+---
+
 ## Store 与 Composable 职责
 
 跨组件共享状态优先放到 Pinia stores；流程编排、流式读取、组合多个 store 的业务动作可以放到 composables。

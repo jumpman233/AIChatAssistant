@@ -442,6 +442,24 @@ fullContent += delta
 - `conversationId` 必须是目标 conversation id
 - 前端根据 `conversationId + messageId` 追加内容
 
+### 6.4.1 text_delta 与 UI 打字机边界
+
+SSE 协议只定义传输事件，不定义 UI 打字机节奏。
+
+`text_delta` 的 chunk 粒度不保证等于用户可见输出粒度。后端可能一次发送多个字符、一句话、半个 Markdown block，或由模型/SDK 决定的任意文本片段。
+
+前端应使用 typewriter buffer 将 `rawContent` 平滑展示为 `displayContent`：
+
+* `rawContent` 表示已经从 SSE 收到的权威内容。
+* `displayContent` 表示当前展示给用户看的内容。
+* `pendingText` 表示已收到但尚未展示的内容。
+
+后端不应为了打字机效果逐字发送 SSE。逐字发送会增加事件数量、网络开销和 Harness 噪音，也会把 UI 展示节奏错误地耦合到协议层。
+
+Markdown chunk 不保证是完整 Markdown block；前端必须容忍半截 Markdown。Markdown 渲染容错属于前端显示层，不改变 SSE event data，不改变数据库最终内容。
+
+Harness 的 `stream-client` 验证的是 SSE 协议、事件结构和事件顺序，不要求验证 UI 打字机动画；如需验证打字机，应放在前端单元测试或 E2E 中。
+
 ---
 
 ### 6.5 正常完成 message_done
@@ -1016,4 +1034,3 @@ Harness 不能为了测试绕过真实 SSE 协议。
 - RAG
 - 文件上传
 - 高风险工具
-

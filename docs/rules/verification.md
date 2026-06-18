@@ -239,6 +239,29 @@
 * parser 遇到非法 JSON 时返回可诊断错误
 * parser 失败时能保留原始片段用于调试
 
+#### Typewriter / Streaming Markdown 逻辑
+
+Harness `stream-client` 只验证 SSE 协议、事件结构和事件顺序，不验证 typewriter UI 动效。
+
+typewriter buffer 纯逻辑可以放到 `tests/unit/`，不依赖真实数据库，不通过真实 HTTP 请求验证。
+
+建议测试文件：
+
+* `tests/unit/typewriter.test.ts`
+* `tests/unit/markdown-normalize.test.ts`
+
+覆盖：
+
+* 收到 `text_delta` 后进入 `pendingText`
+* drain 后 `displayContent` 逐步追上 `rawContent`
+* `message_done` 后加速 drain，并最终 `displayContent === rawContent`
+* abort 时 flush `displayContent` 到 `rawContent`，保证用户所见内容与 partial content 一致
+* retry 创建新 assistant message 时使用新的 typewriter buffer，旧 buffer 被清理
+* `normalizeStreamingMarkdown` 对未闭合 fenced code block 只影响 `renderContent`
+* `normalizeStreamingMarkdown` 不写回 message content，不改变 `rawContent` / `displayContent`
+
+UI E2E 可在 V6 / V7 验证用户可见的 streaming 输出和 Markdown 基础展示；不要要求 Harness stream-client 验证动画节奏。
+
 #### Error Response 逻辑
 
 建议测试文件：

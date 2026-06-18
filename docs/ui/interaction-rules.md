@@ -515,6 +515,81 @@ Assistant message 处于 `aborted` 时：
 
 ---
 
+## Streaming 打字机输出与 Markdown 渲染
+
+### 打字机输出
+
+前端聊天消息在 streaming 中应呈现常见 AI Chat 的“打字机式输出”效果，而不是一次性把较大的 `text_delta` 整段跳出来。
+
+后端不保证逐字发送。后端只保证按标准 SSE 发送 `text_delta`，delta 的粒度不可作为 UI 展示粒度。
+
+前端需要区分：
+
+* `rawContent`：已经从 SSE 收到的权威内容。
+* `displayContent`：当前展示给用户看的内容。
+* `pendingText`：已经收到但尚未展示的内容。
+
+收到 `text_delta` 后：
+
+* `rawContent += delta`。
+* `pendingText += delta`。
+* 启动或继续 typewriter drain loop。
+* 按固定节奏或自适应节奏将 `pendingText` 逐步追加到 `displayContent`。
+
+打字机节奏建议自适应：
+
+* backlog 较小时每 tick 输出 1-2 个字符。
+* backlog 较大时每 tick 输出更多字符。
+* `message_done` 后如果 `pendingText` 仍较多，应加速 drain，避免模型已结束但 UI 长时间未追上。
+
+打字机效果只影响 UI 展示，不改变 SSE 协议，不改变数据库最终内容。
+
+`message_done` 到来时：
+
+* `rawContent` 视为完整内容。
+* 前端继续 drain `pendingText`。
+* drain 完成后 `displayContent` 必须与 `rawContent` 一致。
+* 最终以完整内容做 Markdown 渲染。
+
+用户停止生成时：
+
+* 停止 SSE 读取。
+* 停止 typewriter timer。
+* 将 `displayContent` flush 到 `rawContent`。
+* 使用 `rawContent` 作为 partial content 调用 abort API。
+* 避免用户看到的内容和数据库保存的 partial content 不一致。
+
+retry 时：
+
+* 旧 message 保留。
+* 新 assistant message 创建新的 typewriter buffer。
+* 旧 buffer 应清理。
+
+`MessageItem` 不应自己管理打字机 timer；打字机逻辑应统一由 `useChatStream` / `chatRuntimeStore` 管理。
+
+### Streaming Markdown 渲染
+
+Markdown 渲染第一阶段使用 `markdown-it`。
+
+V2 只保证基础 Markdown 可读和 streaming 过程可接受，不追求完整代码高亮、复制按钮、表格优化。
+
+V7 再补完整 Markdown / CodeBlock 体验，包括代码高亮、复制按钮、表格显示优化等。
+
+streaming 中 Markdown 内容可能是不完整的，尤其是代码块、列表、表格。
+
+前端可以在渲染前做 `normalizeStreamingMarkdown(content, isStreaming)`，但 normalize 只作用于渲染，不得写回 message content，不得写入数据库。
+
+最重要的 normalize 规则是临时闭合未完成代码块：
+
+* 如果 streaming 中发现 fenced code block 的 ``` 数量为奇数，渲染前临时补一个结束 ```。
+* 只生成 `renderContent`，不修改 `displayContent` / `rawContent`。
+
+V2 中列表、表格、标题在 streaming 中允许有轻微跳动或短暂不完美；V7 再优化。
+
+不使用 Nuxt Content / MDC 作为聊天消息主渲染方案；它更适合文档页或静态内容，不适合作为 V2 的动态聊天消息主链路。
+
+---
+
 ## 9. ToolCallCard 交互
 
 ### 9.1 running

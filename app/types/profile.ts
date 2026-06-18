@@ -3,5 +3,5 @@ export type AssistantProfileDTO = {
   name: string
   description: string
   enabledTools: string[]
-  conversationModes?: string[]
+  conversationModes: string[]
 }

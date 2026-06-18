@@ -1,5 +1,8 @@
 <script setup lang="ts">
-const { currentProfileId, error, pending, profiles } = useProfiles()
+import { storeToRefs } from 'pinia'
+
+const profileStore = useProfileStore()
+const { currentProfileId, error, pending, profiles } = storeToRefs(profileStore)
 </script>
 
 <template>

@@ -87,7 +87,7 @@ docs/api-contract.md
 * 停止生成
 * 失败重试
 * Markdown / 代码块渲染
-* Conversation / Message / ToolCall / KnowledgeSource 基础存储
+* Conversation / Message / ToolCall 基础存储
 * Assistant Profile 配置
 * Tool Registry
 * 本地安全工具：calculator、currentTime、mockWeather
@@ -125,9 +125,10 @@ docs/api-contract.md
 * `Conversation`
 * `Message`
 * `ToolCall`
-* `KnowledgeSource`
 
 第一阶段不要新增 `User`、`Auth`、`Organization`、`Payment` 或复杂权限模型。
+
+第一阶段 / V1 不创建 `KnowledgeSource` 表，不实现 `knowledgeSourceRepository`。`KnowledgeSource` 只保留为未来扩展方向或类型口子。
 
 Assistant Profile 第一阶段使用代码配置，数据库中只保存 `profileId`。不要擅自新增 `AssistantProfile` 数据库表。
 

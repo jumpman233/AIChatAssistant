@@ -83,10 +83,11 @@ server/services/chat/
 conversationRepository.ts
 messageRepository.ts
 toolCallRepository.ts
-knowledgeSourceRepository.ts
 ```
 
 repository 只处理数据读写，不处理模型调用、流式响应、UI 状态和 HTTP 细节。
+
+第一阶段 / V1 不创建 `KnowledgeSource` 表，不实现 `knowledgeSourceRepository`。`KnowledgeSource` 只保留为未来扩展方向或类型口子。
 
 ## 工具调用规范
 

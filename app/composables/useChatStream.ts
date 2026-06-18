@@ -31,6 +31,7 @@ export const useChatStream = () => {
       createdAt: now,
       errorMessage: null,
       id: `local-message-${crypto.randomUUID()}`,
+      metadata: null,
       mode: 'chat',
       model: null,
       parentMessageId: null,
@@ -38,6 +39,7 @@ export const useChatStream = () => {
       role: 'user',
       seq: nextSeq,
       status: 'done',
+      toolCalls: [],
       updatedAt: now,
     }
     const assistantMessage: MessageDTO = {
@@ -46,6 +48,7 @@ export const useChatStream = () => {
       createdAt: now,
       errorMessage: null,
       id: `local-message-${crypto.randomUUID()}`,
+      metadata: null,
       mode: 'chat',
       model: 'local-placeholder',
       parentMessageId: userMessage.id,
@@ -53,6 +56,7 @@ export const useChatStream = () => {
       role: 'assistant',
       seq: nextSeq + 1,
       status: 'done',
+      toolCalls: [],
       updatedAt: now,
     }
 

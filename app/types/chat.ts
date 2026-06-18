@@ -13,8 +13,8 @@ export type ToolCallDTO = {
   messageId: string
   toolName: string
   source: ToolSource
-  argumentsJson?: unknown
-  resultJson?: unknown
+  arguments: unknown | null
+  result: unknown | null
   status: ToolCallStatus
   errorMessage: string | null
   startedAt: string | null
@@ -35,8 +35,8 @@ export type MessageDTO = {
   seq: number
   model: string | null
   errorMessage: string | null
-  metadata?: unknown
-  toolCalls?: ToolCallDTO[]
+  metadata: unknown | null
+  toolCalls: ToolCallDTO[]
   createdAt: string
   updatedAt: string
 }
@@ -47,6 +47,8 @@ export type ConversationDTO = {
   profileId: string
   mode: string
   status: ConversationStatus
+  isStreaming: boolean
+  activeAssistantMessageId: string | null
   createdAt: string
   updatedAt: string
 }

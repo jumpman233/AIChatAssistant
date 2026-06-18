@@ -25,8 +25,10 @@ export const useConversation = () => {
   const createLocalConversation = (profileId: string) => {
     const now = new Date().toISOString()
     const conversation: ConversationDTO = {
+      activeAssistantMessageId: null,
       createdAt: now,
       id: `local-${crypto.randomUUID()}`,
+      isStreaming: false,
       mode: 'chat',
       profileId,
       status: 'active',

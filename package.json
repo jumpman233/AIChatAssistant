@@ -9,6 +9,7 @@
     "typecheck": "nuxt typecheck",
     "verify:base": "pnpm typecheck && prisma generate",
     "verify:v1": "tsx tests/harness/scenarios/conversation.scenario.ts",
+    "verify:v2": "tsx tests/harness/scenarios/single-stream.scenario.ts",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {

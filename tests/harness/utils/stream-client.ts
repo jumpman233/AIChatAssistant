@@ -1,34 +1,11 @@
-export type HarnessChatStreamEvent =
-  | {
-      type: 'message_created'
-      streamId: string
-      conversationId: string
-      userMessage: unknown
-      assistantMessage: unknown
-    }
-  | {
-      type: 'text_delta'
-      streamId: string
-      conversationId: string
-      messageId: string
-      delta: string
-    }
-  | {
-      type: 'message_done'
-      streamId: string
-      conversationId: string
-      message: unknown
-    }
-  | {
-      type: 'message_failed'
-      streamId: string
-      conversationId: string
-      message: unknown
-      error: {
-        message: string
-        code?: string
-      }
-    }
+import type { ChatStreamEventData } from '../types/api'
+
+export type HarnessSseEvent<TData = ChatStreamEventData> = {
+  id: string | null
+  event: string
+  data: TData
+  raw: string
+}
 
 type ParsedFrame = {
   id: string | null
@@ -84,7 +61,7 @@ const parseFrame = (raw: string): ParsedFrame | null => {
   }
 }
 
-const parseEvent = (frame: ParsedFrame, rawBuffer: string) => {
+const parseEvent = (frame: ParsedFrame, rawBuffer: string): HarnessSseEvent => {
   if (!frame.event) {
     throw new SseParseError('SSE frame is missing event field', {
       rawBuffer,
@@ -129,13 +106,18 @@ const parseEvent = (frame: ParsedFrame, rawBuffer: string) => {
     )
   }
 
-  return data as HarnessChatStreamEvent
+  return {
+    data: data as ChatStreamEventData,
+    event: frame.event,
+    id: frame.id,
+    raw: frame.raw,
+  }
 }
 
 export const parseSseChunk = (input: {
   buffer: string
   chunk: string
-  events: HarnessChatStreamEvent[]
+  events: HarnessSseEvent[]
 }) => {
   const rawBuffer = input.buffer + input.chunk
   const normalizedBuffer = rawBuffer.replace(/\r\n/g, '\n')
@@ -164,7 +146,7 @@ export const readSseStream = async (response: Response) => {
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  const events: HarnessChatStreamEvent[] = []
+  const events: HarnessSseEvent[] = []
   let buffer = ''
 
   while (true) {

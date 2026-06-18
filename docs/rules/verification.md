@@ -18,6 +18,14 @@
 * V2 以后涉及流式响应的验证必须复用统一 stream client，能够收集 `message_created`、`text_delta`、`tool_call_created`、`tool_call_updated`、`message_done`、`message_failed`，并支持超时和失败时输出原始片段。
 * 涉及数据库断言时，应同时验证 API 行为和数据库状态，尤其是 soft delete、message status、seq、ToolCall status、retry 是否创建新消息、旧消息是否保留。
 
+## Harness API 契约类型
+
+* Harness 中与 API 契约对应的 DTO、response、SSE event data 类型统一放在 `tests/harness/types/api.ts`。
+* Scenario 文件不要重复声明 `ConversationDTO`、`MessageDTO`、`ToolCallDTO`、`ListMessagesResponse`、`ChatStreamEvent` 等 API 契约类型，应从 `tests/harness/types/api.ts` type-only import。
+* `tests/harness/types/api.ts` 的字段定义以 `docs/api-contract.md` 为准；如果 API 契约变更，应先更新 `docs/api-contract.md`，再同步该类型文件和相关断言。
+* Harness 不应从 `server/` 的 service、repository、mapper 导入实现类型，避免验收测试与实现细节耦合。
+* 如需复用前端共享 DTO 类型，只能在确认该类型文件本身就是 API 契约镜像、且不会引入 runtime/store/composable 依赖时使用；默认优先维护 Harness 自己的契约类型入口。
+
 ## 后端接口与逻辑测试覆盖矩阵
 
 本矩阵直接放在本文档中，作为后端验证策略的主入口。若后续接口和单元测试清单继续膨胀，可以拆到独立测试矩阵文档，再由本文档指路。

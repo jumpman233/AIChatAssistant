@@ -1,56 +1,17 @@
 import type { PrismaClient } from '@prisma/client'
+import type {
+  ConversationDTO,
+  DeleteConversationResponse,
+  ListConversationsResponse,
+  ListMessagesResponse,
+  ListProfilesResponse,
+  MessageDTO,
+} from '../types/api'
 import { ApiClient } from '../utils/api-client'
 import { assert, assertArray, assertEqual } from '../utils/assert'
 import { prepareTestDatabase } from '../utils/db'
 import { assertConversationSoftDeleted } from '../utils/db-assert'
 import { startTestServer, type TestServer } from '../utils/server'
-
-type ConversationDTO = {
-  id: string
-  title: string | null
-  profileId: string
-  mode: string
-  status: 'active' | 'archived' | 'deleted'
-  isStreaming: boolean
-  activeAssistantMessageId: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-type ListConversationsResponse = {
-  items: ConversationDTO[]
-  nextCursor: string | null
-}
-
-type ListMessagesResponse = {
-  items: MessageDTO[]
-  pageInfo: {
-    limit: number
-    hasMoreBefore: boolean
-    hasMoreAfter: boolean
-    beforeSeq: number | null
-    afterSeq: number | null
-  }
-}
-
-type DeleteConversationResponse = {
-  id: string
-  status: 'deleted'
-}
-
-type ListProfilesResponse = {
-  items: unknown[]
-}
-
-type MessageDTO = {
-  id: string
-  conversationId: string
-  role: 'user' | 'assistant' | 'tool' | 'system'
-  content: string
-  status: 'pending' | 'streaming' | 'done' | 'failed' | 'aborted'
-  seq: number
-  toolCalls: unknown[]
-}
 
 const assertInitialConversation = (conversation: ConversationDTO) => {
   assert(conversation.id, 'Expected conversation id')

@@ -25,6 +25,14 @@ export class ApiClient {
     })
   }
 
+  postRaw(path: string, body?: unknown) {
+    return fetch(`${this.baseUrl}${path}`, {
+      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      method: 'POST',
+    })
+  }
+
   delete<T>(path: string) {
     return this.request<T>(path, {
       method: 'DELETE',

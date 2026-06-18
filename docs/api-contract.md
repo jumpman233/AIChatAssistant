@@ -4,54 +4,65 @@
 
 ## 1. 文档目的
 
-本文档定义 `AIChatAssistant` 第一阶段后端 API 契约。
+本文档定义 `AIChatAssistant` 第一阶段前后端 API 契约。
 
-后端第一阶段使用 Nuxt server routes / Nitro 实现。
-API 文件建议位于：
+本文档回答：
 
-```text id="b0hzqx"
-server/api/
+- 前端可以调用哪些接口
+- 每个接口的请求参数是什么
+- 每个接口的响应结构是什么
+- 错误结构是什么
+- 流式接口使用什么协议
+- SSE 事件类型和字段是什么
+- 历史消息如何分页拉取
+- 多会话 streaming 状态如何暴露给前端
+
+如果本文档与其他文档冲突，优先级建议如下：
+
+```text
+1. docs/api-contract.md
+2. docs/architecture/streaming-protocol.md
+3. docs/rules/chat-flow.md
+4. docs/architecture/chat-flow-diagrams.md
+5. docs/ui/ui-implements.md
 ```
-
-本文档用于约束：
-
-* API 路径
-* 请求参数
-* 响应结构
-* 错误结构
-* 会话 / 消息 / 流式聊天相关行为
-
-如果 API 行为发生变化，需要同步更新本文档。
 
 ---
 
 ## 2. 通用约定
 
-### 2.1 响应格式
+### 2.1 数据格式
 
-普通 JSON 接口成功时直接返回业务对象或业务列表。
+普通 API：
+
+```http
+Content-Type: application/json
+Accept: application/json
+```
+
+流式 API：
+
+```http
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache
+Connection: keep-alive
+```
+
+时间字段统一使用 ISO 8601 字符串。
 
 示例：
 
-```json id="x1ykb6"
-{
-  "id": "conversation_id",
-  "title": "新的会话",
-  "profileId": "general",
-  "mode": "chat",
-  "status": "active",
-  "createdAt": "2026-06-17T10:00:00.000Z",
-  "updatedAt": "2026-06-17T10:00:00.000Z"
-}
+```text
+2026-06-18T10:00:00.000Z
 ```
 
 ---
 
-### 2.2 错误格式
+### 2.2 通用错误响应
 
-错误响应统一使用：
+普通 JSON API 或 SSE stream 开始前的错误，统一使用 JSON 返回：
 
-```ts id="6eugkd"
+```ts
 type ApiErrorResponse = {
   message: string
   code?: string
@@ -61,547 +72,58 @@ type ApiErrorResponse = {
 
 示例：
 
-```json id="yns2fu"
+```json
 {
-  "message": "Conversation not found",
-  "code": "CONVERSATION_NOT_FOUND"
+  "message": "Current conversation already has an active streaming message",
+  "code": "CONVERSATION_STREAMING"
 }
 ```
 
-要求：
+常见错误码：
 
-* 不向前端返回 stack trace。
-* 不返回 API Key。
-* 不返回数据库连接信息。
-* 不返回模型供应商密钥或内部敏感配置。
+```text
+BAD_REQUEST
+NOT_FOUND
+CONVERSATION_DELETED
+CONVERSATION_STREAMING
+MESSAGE_NOT_RETRYABLE
+MESSAGE_NOT_ABORTABLE
+INTERNAL_ERROR
+```
+
+常见 HTTP 状态码：
+
+| 状态码 | 使用场景 |
+|---|---|
+| `400` | 请求参数错误 |
+| `404` | conversation / message 不存在 |
+| `409` | 状态冲突，例如同一 Conversation 已有 active streaming |
+| `500` | 服务端内部错误 |
 
 ---
 
-### 2.3 时间格式
+### 2.3 stream 开始前错误与 stream 开始后错误
 
-所有时间字段使用 ISO 字符串。
+流式接口有两个错误边界。
+
+#### stream 开始前错误
+
+在 SSE stream 尚未开始前发生的错误，使用普通 JSON error + HTTP status 返回。
+
+例子：
+
+- `conversationId` 不存在
+- conversation 已 `deleted`
+- `content` 为空
+- `profileId` 无效
+- 同一 Conversation 已有 active streaming
 
 示例：
 
-```text id="q4063n"
-2026-06-17T10:00:00.000Z
+```http
+HTTP/1.1 409 Conflict
+Content-Type: application/json
 ```
-
----
-
-### 2.4 状态枚举
-
-API 层状态值需要与 Prisma enum 和前端类型保持一致。
-
-#### ConversationStatus
-
-```ts id="ctfbh0"
-type ConversationStatus = 'active' | 'archived' | 'deleted'
-```
-
-#### MessageRole
-
-```ts id="c48cqv"
-type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
-```
-
-#### MessageStatus
-
-```ts id="uupn20"
-type MessageStatus = 'pending' | 'streaming' | 'done' | 'failed' | 'aborted'
-```
-
-#### ToolCallStatus
-
-```ts id="p1k8d3"
-type ToolCallStatus = 'pending' | 'running' | 'success' | 'failed'
-```
-
-#### ToolSource
-
-```ts id="sc91q4"
-type ToolSource = 'local' | 'mcp'
-```
-
----
-
-## 3. 核心数据结构
-
-### 3.1 ConversationDTO
-
-```ts id="m5jk5x"
-type ConversationDTO = {
-  id: string
-  title: string | null
-  profileId: string
-  mode: string
-  status: ConversationStatus
-  createdAt: string
-  updatedAt: string
-}
-```
-
----
-
-### 3.2 MessageDTO
-
-```ts id="gg2u0e"
-type MessageDTO = {
-  id: string
-  conversationId: string
-  parentMessageId: string | null
-  role: MessageRole
-  content: string
-  profileId: string
-  mode: string
-  status: MessageStatus
-  seq: number
-  model: string | null
-  errorMessage: string | null
-  metadata?: unknown
-  toolCalls?: ToolCallDTO[]
-  createdAt: string
-  updatedAt: string
-}
-```
-
----
-
-### 3.3 ToolCallDTO
-
-```ts id="80al8u"
-type ToolCallDTO = {
-  id: string
-  messageId: string
-  toolName: string
-  source: ToolSource
-  argumentsJson?: unknown
-  resultJson?: unknown
-  status: ToolCallStatus
-  errorMessage: string | null
-  startedAt: string | null
-  finishedAt: string | null
-  createdAt: string
-  updatedAt: string
-}
-```
-
----
-
-## 4. Conversation API
-
-## 4.1 创建会话
-
-```http id="9v6o9l"
-POST /api/conversations
-```
-
-### Request Body
-
-```ts id="xlwhpl"
-type CreateConversationRequest = {
-  profileId?: string
-  mode?: string
-  title?: string
-}
-```
-
-### 默认值
-
-```text id="ebve8h"
-profileId = general
-mode = chat
-title = null
-status = active
-```
-
-### Response
-
-```ts id="e85xzq"
-type CreateConversationResponse = ConversationDTO
-```
-
-### 说明
-
-* 如果 `profileId` 不存在，应返回错误。
-* 第一阶段 Profile 来自代码配置，不来自数据库。
-* 创建会话时不创建默认消息。
-
----
-
-## 4.2 获取会话列表
-
-```http id="e13fxi"
-GET /api/conversations
-```
-
-### Query
-
-```ts id="xzdbhr"
-type ListConversationsQuery = {
-  status?: ConversationStatus
-  profileId?: string
-  limit?: number
-  cursor?: string
-}
-```
-
-### 默认行为
-
-* 默认不返回 `deleted` 会话。
-* 默认按 `updatedAt DESC` 排序。
-* 第一阶段可以先不实现 cursor 分页，但接口预留。
-
-### Response
-
-```ts id="h6v0oj"
-type ListConversationsResponse = {
-  items: ConversationDTO[]
-  nextCursor?: string | null
-}
-```
-
----
-
-## 4.3 获取单个会话
-
-```http id="x34dc9"
-GET /api/conversations/:id
-```
-
-### Response
-
-```ts id="jta94c"
-type GetConversationResponse = ConversationDTO
-```
-
-### 错误
-
-会话不存在：
-
-```json id="9hpavd"
-{
-  "message": "Conversation not found",
-  "code": "CONVERSATION_NOT_FOUND"
-}
-```
-
----
-
-## 4.4 删除会话
-
-```http id="xcrljo"
-DELETE /api/conversations/:id
-```
-
-### 行为
-
-第一阶段使用软删除：
-
-```text id="v8uh90"
-Conversation.status = deleted
-```
-
-不物理删除 Conversation、Message、ToolCall。
-
-### Response
-
-```ts id="usnuk3"
-type DeleteConversationResponse = {
-  id: string
-  status: 'deleted'
-}
-```
-
----
-
-## 5. Message API
-
-## 5.1 获取会话消息列表
-
-```http id="6wr9dp"
-GET /api/conversations/:id/messages
-```
-
-### Query
-
-```ts id="9wmx5q"
-type ListMessagesQuery = {
-  afterSeq?: number
-  limit?: number
-}
-```
-
-### 默认行为
-
-* 按 `seq ASC` 排序。
-* 如果传入 `afterSeq`，只返回 `seq > afterSeq` 的消息。
-* 第一阶段默认返回当前会话全部消息即可。
-
-### Response
-
-```ts id="chll4u"
-type ListMessagesResponse = {
-  items: MessageDTO[]
-}
-```
-
----
-
-## 5.2 中止 assistant 消息
-
-```http id="u2clcv"
-POST /api/messages/:id/abort
-```
-
-### Request Body
-
-```ts id="ie7oj2"
-type AbortMessageRequest = {
-  content?: string
-}
-```
-
-### 行为
-
-用于停止生成后的显式状态修正。
-
-要求：
-
-* 只能中止 `assistant` 消息。
-* 如果消息已经是 `done`，不应改成 `aborted`。
-* 如果消息状态是 `streaming` 或 `pending`，可以改成 `aborted`。
-* 如果请求体带有 `content`，保存当前已生成内容。
-* 如果不带 `content`，保留数据库中已有内容。
-
-### Response
-
-```ts id="uvrxhv"
-type AbortMessageResponse = MessageDTO
-```
-
----
-
-## 5.3 重试消息
-
-```http id="5nam4l"
-POST /api/messages/:id/retry
-```
-
-### Request Body
-
-```ts id="60iwlt"
-type RetryMessageRequest = {
-  profileId?: string
-  mode?: string
-}
-```
-
-### 行为
-
-用于对失败或中止的 assistant message 进行重试。
-
-要求：
-
-* 不覆盖旧的 failed / aborted message。
-* 创建新的 assistant message。
-* 新 assistant message 的状态进入 `streaming`。
-* 新 assistant message 应关联到原始 user message 或旧 assistant message。
-* 返回流式响应，或返回新 assistant message 后由前端再次调用 chat 接口。
-
-### 第一阶段推荐实现
-
-第一阶段推荐让 retry 接口直接触发新的流式生成。
-
-```text id="3xvpmy"
-POST /api/messages/:id/retry
-  ↓
-查找原 assistant message
-  ↓
-找到 parent user message
-  ↓
-创建新的 assistant message
-  ↓
-重新调用模型或 mock stream
-  ↓
-返回 stream
-```
-
-如果实现复杂，也可以拆成两步，但需要在代码和文档中保持一致。
-
----
-
-## 6. Chat API
-
-## 6.1 发送聊天消息
-
-```http id="fya2zv"
-POST /api/chat
-```
-
-### Request Body
-
-```ts id="m8o771"
-type SendChatRequest = {
-  conversationId: string
-  profileId?: string
-  mode?: string
-  content: string
-  mock?: boolean
-}
-```
-
-### 字段说明
-
-#### conversationId
-
-目标会话 ID。
-
-必须存在，且不能是 `deleted` 会话。
-
----
-
-#### profileId
-
-本次消息使用的 Assistant Profile ID。
-
-如果不传，使用 Conversation 的 `profileId`。
-
----
-
-#### mode
-
-本次消息使用的 Conversation Mode。
-
-如果不传，使用 Conversation 的 `mode`。
-
-第一阶段默认：
-
-```text id="mjhxqm"
-chat
-```
-
----
-
-#### content
-
-用户输入内容。
-
-要求：
-
-* 必填。
-* trim 后不能为空。
-* 第一阶段可以限制最大长度，例如 2000 字符。
-
----
-
-#### mock
-
-是否强制使用 mock stream。
-
-第一阶段也可以通过环境变量控制 mock 模式。
-
----
-
-### Response
-
-该接口返回流式响应。
-
-推荐使用 `text/event-stream` 或兼容 `ReadableStream` 的响应格式。
-
-第一阶段需要至少支持以下事件或数据片段：
-
-```ts id="yhk1w7"
-type ChatStreamEvent =
-  | {
-      type: 'message_created'
-      userMessage: MessageDTO
-      assistantMessage: MessageDTO
-    }
-  | {
-      type: 'text_delta'
-      messageId: string
-      delta: string
-    }
-  | {
-      type: 'tool_call_created'
-      toolCall: ToolCallDTO
-    }
-  | {
-      type: 'tool_call_updated'
-      toolCall: ToolCallDTO
-    }
-  | {
-      type: 'message_done'
-      message: MessageDTO
-    }
-  | {
-      type: 'message_failed'
-      message: MessageDTO
-      error: {
-        message: string
-        code?: string
-      }
-    }
-```
-
-### 推荐流式事件格式
-
-如果使用 SSE，每个事件可以使用：
-
-```text id="s3r2t3"
-event: text_delta
-data: {"messageId":"xxx","delta":"hello"}
-```
-
-如果使用普通 ReadableStream，也需要保证前端可以解析出事件类型。
-
-### 行为
-
-`POST /api/chat` 执行以下流程：
-
-1. 校验 conversation 是否存在且未删除。
-2. 解析本次使用的 `profileId` 和 `mode`。
-3. 校验用户输入。
-4. 创建 user message，状态为 `done`。
-5. 创建 assistant message，状态为 `streaming`。
-6. 返回 `message_created` 事件。
-7. 调用 mock stream 或真实模型 stream。
-8. 流式返回 `text_delta`。
-9. 如触发工具调用，创建并更新 ToolCall。
-10. 正常完成后更新 assistant message 为 `done`。
-11. 返回 `message_done` 事件。
-12. 失败时更新 assistant message 为 `failed`。
-13. 返回 `message_failed` 事件。
-14. 客户端中断时尽量保存已生成内容，并将 assistant message 标记为 `aborted`。
-
-### 并发规则
-
-`POST /api/chat` 只作用于请求中的目标 `conversationId`。
-
-允许：
-
-```text
-Conversation A 正在 streaming
-Conversation B 同时发起 streaming
-```
-
-禁止：
-
-```text
-Conversation A 已经有 assistant message 正在 streaming
-Conversation A 再次发起新的 chat 请求
-```
-
-后端处理规则：
-
-1. 不允许使用全局 streaming 锁。
-2. 只检查目标 Conversation 内是否存在 `pending` 或 `streaming` 状态的 assistant message。
-3. 如果目标 Conversation 已经存在 active streaming message，应返回 `409 Conflict`。
-4. 不同 Conversation 的流式请求互不影响。
-5. 停止生成时使用 `POST /api/messages/:id/abort`，按 messageId 精确中止，不按 conversationId 全局中止。
-
-冲突错误示例：
 
 ```json
 {
@@ -610,56 +132,161 @@ Conversation A 再次发起新的 chat 请求
 }
 ```
 
+#### stream 开始后错误
+
+一旦 SSE stream 已经开始，就不能再通过 HTTP status 表达业务错误。
+
+此时必须发送 SSE event：
+
+```text
+event: message_failed
+data: {...}
+```
+
+然后关闭 stream。
 
 ---
 
-## 7. Profile API
+## 3. 核心 DTO
 
-第一阶段 Profile 使用代码配置，不入库。
+### 3.1 ConversationDTO
 
-可以提供只读接口给前端使用。
+```ts
+type ConversationStatus = 'active' | 'archived' | 'deleted'
 
-## 7.1 获取 Profile 列表
+type ConversationDTO = {
+  id: string
+  title: string | null
+  profileId: string
+  mode: string
+  status: ConversationStatus
 
-```http id="l5ioha"
-GET /api/profiles
+  /**
+   * 当前 Conversation 是否存在 active assistant message。
+   *
+   * active assistant message 定义：
+   * role = assistant
+   * status in ['pending', 'streaming']
+   */
+  isStreaming: boolean
+
+  /**
+   * 当前 active assistant message id。
+   * 如果 isStreaming = false，则为 null。
+   */
+  activeAssistantMessageId: string | null
+
+  createdAt: string
+  updatedAt: string
+}
 ```
 
-### Response
+说明：
 
-```ts id="p9fy4e"
+- `isStreaming` 和 `activeAssistantMessageId` 用于让非发起生成的页面知道某个会话正在生成。
+- MVP 阶段不做跨页面实时 delta 同步。
+- 发起生成的页面通过 SSE 实时接收 delta。
+- 其他页面只能看到该 Conversation 正在 streaming；生成完成后通过重新拉取 messages 获得最终内容。
+
+---
+
+### 3.2 MessageDTO
+
+```ts
+type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
+type MessageStatus = 'pending' | 'streaming' | 'done' | 'failed' | 'aborted'
+
+type MessageDTO = {
+  id: string
+  conversationId: string
+  parentMessageId: string | null
+
+  role: MessageRole
+  content: string
+  profileId: string
+  mode: string
+  status: MessageStatus
+
+  seq: number
+
+  model: string | null
+  errorMessage: string | null
+  metadata: unknown | null
+
+  toolCalls: ToolCallDTO[]
+
+  createdAt: string
+  updatedAt: string
+}
+```
+
+说明：
+
+- 消息列表默认按 `seq ASC` 返回。
+- `parentMessageId` 第一阶段主要用于表达 assistant message 对应的 user message。
+- 重试时新 assistant message 不覆盖旧 message，而是创建新 message。
+- 新 retry assistant message 的 `parentMessageId` 指向同一条 user message。
+
+---
+
+### 3.3 ToolCallDTO
+
+```ts
+type ToolCallStatus = 'pending' | 'running' | 'success' | 'failed'
+type ToolSource = 'local' | 'mcp'
+
+type ToolCallDTO = {
+  id: string
+  messageId: string
+
+  toolName: string
+  source: ToolSource
+
+  arguments: unknown | null
+  result: unknown | null
+
+  status: ToolCallStatus
+  errorMessage: string | null
+
+  startedAt: string | null
+  finishedAt: string | null
+
+  createdAt: string
+  updatedAt: string
+}
+```
+
+说明：
+
+- DTO 使用 `arguments` / `result`。
+- 数据库字段可以是 `argumentsJson` / `resultJson`，但前端不直接感知数据库字段名。
+- ToolCall 必须关联到 assistant message。
+
+---
+
+### 3.4 AssistantProfileDTO
+
+```ts
 type AssistantProfileDTO = {
   id: string
   name: string
   description: string
   enabledTools: string[]
-  conversationModes?: string[]
+  conversationModes: string[]
 }
 ```
 
-注意：
+说明：
 
-* 不一定要把完整 `systemPrompt` 返回给前端。
-* `systemPrompt` 可以只在服务端使用。
+- 第一阶段 `AssistantProfile` 不入库。
+- Profile 由服务端代码配置。
+- `GET /api/profiles` 默认不返回完整 `systemPrompt`，避免前端依赖 prompt 细节。
 
 ---
 
-## 8. Tool API
+### 3.5 ToolDTO
 
-第一阶段不要求提供独立工具执行接口。
-工具调用由模型生成后，在 `POST /api/chat` 或 retry 流程中由后端执行。
-
-可以提供只读接口用于前端展示可用工具。
-
-## 8.1 获取工具列表
-
-```http id="2ujwrd"
-GET /api/tools
-```
-
-### Response
-
-```ts id="prmhy9"
+```ts
 type ToolDTO = {
   name: string
   description: string
@@ -667,114 +294,693 @@ type ToolDTO = {
 }
 ```
 
-注意：
+---
 
-* 不返回内部 execute 逻辑。
-* 不返回敏感配置。
-* 不开放任意工具调用接口。
+## 4. 普通 JSON API
+
+普通 JSON API 返回 `application/json`。
 
 ---
 
-## 9. 状态更新规则
+## 4.1 POST /api/conversations
 
-### 9.1 User Message
+### 用途
 
-创建后直接进入：
+创建一个新的 Conversation。
 
-```text id="qn3u4w"
-done
+典型场景：
+
+- 用户点击“新建会话”
+- 用户首次进入页面且没有 active conversation
+- 用户点击“清空当前会话”时采用“创建新会话”策略
+
+### Request Body
+
+```ts
+type CreateConversationRequest = {
+  profileId?: string
+  mode?: string
+  title?: string | null
+}
 ```
 
----
+默认值：
 
-### 9.2 Assistant Message
-
-正常生成：
-
-```text id="8oysyy"
-pending -> streaming -> done
+```ts
+profileId = 'general'
+mode = 'chat'
+title = null
 ```
 
-失败：
+### Response
 
-```text id="4npcd4"
-pending -> streaming -> failed
-```
-
-停止：
-
-```text id="3kg4hj"
-pending -> streaming -> aborted
-```
-
-第一阶段可以创建时直接设为：
-
-```text id="k04z9j"
-streaming
-```
-
----
-
-### 9.3 ToolCall
-
-成功：
-
-```text id="x9v9k2"
-pending -> running -> success
-```
-
-失败：
-
-```text id="qgntvy"
-pending -> running -> failed
+```ts
+type CreateConversationResponse = ConversationDTO
 ```
 
 ---
 
-## 10. 第一阶段接口清单
+## 4.2 GET /api/conversations
 
-必须实现：
+### 用途
 
-```text id="p64ez5"
-POST   /api/conversations
-GET    /api/conversations
-GET    /api/conversations/:id
-DELETE /api/conversations/:id
+获取 Conversation 列表，用于左侧会话列表。
 
-GET    /api/conversations/:id/messages
+典型场景：
 
-POST   /api/chat
-POST   /api/messages/:id/abort
-POST   /api/messages/:id/retry
+- 页面初始化
+- 刷新页面恢复会话列表
+- 创建新会话后刷新列表
+- 删除会话后刷新列表
+- 查看哪些会话正在 streaming
 
-GET    /api/profiles
+### Query
+
+```ts
+type ListConversationsQuery = {
+  status?: 'active' | 'archived' | 'deleted'
+  profileId?: string
+  limit?: number
+  cursor?: string
+}
 ```
 
-可选实现：
+默认规则：
 
-```text id="gr99mx"
-GET    /api/tools
+- 默认不返回 `deleted`
+- 默认按 `updatedAt DESC`
+- `limit` 默认 `50`
+
+### Response
+
+```ts
+type ListConversationsResponse = {
+  items: ConversationDTO[]
+  nextCursor: string | null
+}
 ```
-
-POST /api/chat 必须支持不同 conversationId 的并发请求，但必须拒绝同一 conversationId 内的并发生成。
 
 ---
 
-## 11. 第一阶段明确不提供的接口
+## 4.3 GET /api/conversations/:id
 
-第一阶段不要实现：
+### 用途
 
-```text id="ed98ee"
-POST /api/login
-POST /api/register
-POST /api/upload
-POST /api/rag/query
-POST /api/mcp/connect
-POST /api/tools/:name/execute
-POST /api/email/send
-POST /api/calendar/create
-POST /api/files/delete
+获取单个 Conversation 详情。
+
+典型场景：
+
+- 用户点击某个会话
+- URL 直接打开指定 conversation
+- 刷新页面恢复当前会话
+- 发送消息前校验当前 conversation 是否有效
+
+### Response
+
+```ts
+type GetConversationResponse = ConversationDTO
 ```
 
-不要暴露任意工具执行接口。
-不要让前端绕过模型流程直接执行高风险工具。
+### deleted 会话规则
+
+第一阶段建议：
+
+- `deleted` conversation 默认视为不可访问。
+- `GET /api/conversations/:id` 对 deleted conversation 返回 `404`。
+- `POST /api/chat` 不允许对 deleted conversation 发送消息。
+
+---
+
+## 4.4 DELETE /api/conversations/:id
+
+### 用途
+
+软删除 Conversation。
+
+### 行为
+
+不是物理删除数据库记录，而是：
+
+```text
+Conversation.status = deleted
+```
+
+### Response
+
+```ts
+type DeleteConversationResponse = {
+  id: string
+  status: 'deleted'
+}
+```
+
+### 规则
+
+- deleted 会话不出现在 `GET /api/conversations` 默认列表中。
+- deleted 会话不能继续发送消息。
+- deleted 会话的 messages 保留在数据库中。
+- 第一阶段不提供物理删除接口。
+
+---
+
+## 4.5 GET /api/conversations/:id/messages
+
+### 用途
+
+拉取某个 Conversation 的历史消息。
+
+典型场景：
+
+- 用户点击会话
+- 刷新页面恢复聊天记录
+- 发送完成后重新校准本地消息
+- 另一个页面手动刷新消息列表
+- 生成完成后，非发起生成页面重新拉取最终消息
+
+### Query
+
+```ts
+type ListMessagesQuery = {
+  /**
+   * 返回数量。
+   * 默认 50。
+   * 建议最大值 100。
+   */
+  limit?: number
+
+  /**
+   * 拉取 seq 小于 beforeSeq 的消息。
+   * 用于向更早历史翻页。
+   */
+  beforeSeq?: number
+
+  /**
+   * 拉取 seq 大于 afterSeq 的消息。
+   * 用于获取某个 seq 之后的新消息。
+   */
+  afterSeq?: number
+}
+```
+
+### 默认规则
+
+- `limit` 默认 `50`
+- 按 `seq ASC` 返回
+- `beforeSeq` 和 `afterSeq` 第一阶段不建议同时使用
+- 如果未传 `beforeSeq` / `afterSeq`，返回最近 `limit` 条消息，并按 `seq ASC` 输出
+- 如果传 `beforeSeq`，返回 `seq < beforeSeq` 的最近 `limit` 条消息，并按 `seq ASC` 输出
+- 如果传 `afterSeq`，返回 `seq > afterSeq` 的最多 `limit` 条消息，并按 `seq ASC` 输出
+
+### Response
+
+```ts
+type ListMessagesResponse = {
+  items: MessageDTO[]
+
+  pageInfo: {
+    limit: number
+    hasMoreBefore: boolean
+    hasMoreAfter: boolean
+    beforeSeq: number | null
+    afterSeq: number | null
+  }
+}
+```
+
+### 示例：首次加载
+
+```http
+GET /api/conversations/conv_a/messages?limit=50
+```
+
+返回最近 50 条消息，按 `seq ASC` 输出。
+
+### 示例：向上加载更早消息
+
+```http
+GET /api/conversations/conv_a/messages?limit=50&beforeSeq=101
+```
+
+返回 `seq < 101` 的最近 50 条消息，按 `seq ASC` 输出。
+
+### 示例：拉取某个 seq 之后的新消息
+
+```http
+GET /api/conversations/conv_a/messages?limit=50&afterSeq=120
+```
+
+返回 `seq > 120` 的最多 50 条消息，按 `seq ASC` 输出。
+
+### 多页面行为
+
+MVP 阶段不做跨页面实时 delta 同步。
+
+如果页面 A 正在通过 SSE 接收 Conversation X 的实时 delta，页面 B 打开同一个 Conversation X 时：
+
+- 页面 B 可以通过 `GET /api/conversations/:id` 知道该 Conversation 正在 streaming。
+- 页面 B 通过 `GET /api/conversations/:id/messages` 只能拿到数据库中已落库的消息。
+- 因为第一阶段不每个 token 写库，页面 B 不一定能看到 partial content。
+- 生成完成后，页面 B 需要重新调用 `GET /api/conversations/:id/messages` 获得最终消息。
+
+---
+
+## 4.6 GET /api/profiles
+
+### 用途
+
+获取可用 Assistant Profile 列表。
+
+典型场景：
+
+- 页面初始化
+- ProfileSwitcher 展示选项
+- 创建会话时选择 profileId
+
+### Response
+
+```ts
+type ListProfilesResponse = {
+  items: AssistantProfileDTO[]
+}
+```
+
+---
+
+## 4.7 GET /api/tools 可选
+
+### 用途
+
+获取可用工具列表。
+
+典型场景：
+
+- 调试页面
+- Tool Registry 展示
+- Profile 说明
+- README demo
+
+### Response
+
+```ts
+type ListToolsResponse = {
+  items: ToolDTO[]
+}
+```
+
+说明：该接口第一阶段可选。即使不提供 `GET /api/tools`，后端仍然需要有 Tool Registry。
+
+---
+
+## 4.8 POST /api/messages/:id/abort
+
+### 用途
+
+显式停止并标记某条 assistant message 为 `aborted`。
+
+### Request Body
+
+```ts
+type AbortMessageRequest = {
+  /**
+   * 前端当前已经收到并拼接的 partial content。
+   * 如果提供，后端保存该 content。
+   * 如果不提供，后端保留数据库中已有 content。
+   */
+  content?: string
+}
+```
+
+### Response
+
+```ts
+type AbortMessageResponse = MessageDTO
+```
+
+### 规则
+
+- 只能作用于 assistant message。
+- 只有 `pending` / `streaming` 可以变成 `aborted`。
+- `done` 不能被改成 `aborted`。
+- 如果 abort 请求到达时 message 已经 `done`，以 `done` 为准。
+- abort 只影响目标 `messageId`，不影响其他 Conversation。
+- 前端调用 `AbortController.abort()` 只会中断本地读取；仍必须调用该接口修正后端状态。
+
+---
+
+## 5. 流式 API：SSE
+
+流式 API 返回 `text/event-stream`。
+
+第一阶段有两个流式接口：
+
+```text
+POST /api/chat
+POST /api/messages/:id/retry
+```
+
+二者使用同一套 SSE event 格式。
+
+---
+
+## 5.1 SSE Frame 格式
+
+每个事件使用标准 SSE frame：
+
+```text
+id: <eventId>
+event: <eventType>
+data: <json>
+```
+
+事件之间使用空行分隔。
+
+示例：
+
+```text
+id: evt_001
+event: text_delta
+data: {"type":"text_delta","streamId":"stream_xxx","conversationId":"conv_xxx","messageId":"msg_xxx","delta":"你好"}
+
+```
+
+要求：
+
+- `event` 字段必须等于 `data.type`
+- `data` 必须是 JSON 字符串
+- 每个事件必须有 `streamId`
+- 每个事件必须有 `conversationId`
+- 涉及具体 message 的事件必须有 `messageId` 或完整 `message`
+- 前端必须按 SSE frame 解析，不要当纯文本 chunk 处理
+
+---
+
+## 5.2 ChatStreamEvent
+
+```ts
+type ChatStreamEvent =
+  | {
+      type: 'message_created'
+      streamId: string
+      conversationId: string
+      userMessage: MessageDTO
+      assistantMessage: MessageDTO
+    }
+  | {
+      type: 'text_delta'
+      streamId: string
+      conversationId: string
+      messageId: string
+      delta: string
+    }
+  | {
+      type: 'tool_call_created'
+      streamId: string
+      conversationId: string
+      messageId: string
+      toolCall: ToolCallDTO
+    }
+  | {
+      type: 'tool_call_updated'
+      streamId: string
+      conversationId: string
+      messageId: string
+      toolCall: ToolCallDTO
+    }
+  | {
+      type: 'message_done'
+      streamId: string
+      conversationId: string
+      message: MessageDTO
+    }
+  | {
+      type: 'message_failed'
+      streamId: string
+      conversationId: string
+      message: MessageDTO
+      error: {
+        message: string
+        code?: string
+      }
+    }
+```
+
+---
+
+## 5.3 POST /api/chat
+
+### 用途
+
+发送一条新的用户消息，并创建新的 assistant 流式回复。
+
+### Request Body
+
+```ts
+type CreateChatRequest = {
+  conversationId: string
+  profileId?: string
+  mode?: string
+  content: string
+
+  /**
+   * 第一阶段用于控制 mock stream 行为。
+   * 真实模型接入后可以移除或改为内部测试参数。
+   */
+  mock?: {
+    delayMs?: number
+    failAtChunk?: number
+    triggerTools?: boolean
+  }
+}
+```
+
+默认值：
+
+```ts
+profileId = conversation.profileId
+mode = conversation.mode
+```
+
+### Response
+
+成功时：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache
+Connection: keep-alive
+```
+
+返回 SSE event stream。
+
+### 后端流程
+
+1. 校验 request body。
+2. 校验 conversation 存在且未 deleted。
+3. 校验 profileId 有效。
+4. 校验 content 非空。
+5. 检查目标 conversation 是否已有 active assistant message。
+6. 如果已有，返回 `409 CONVERSATION_STREAMING`，不打开 SSE stream。
+7. 生成 `streamId`。
+8. 在数据库事务中创建 user message 和 assistant message。
+9. 发送 `message_created` SSE event。
+10. 开始 mock/model stream。
+11. 持续发送 `text_delta`。
+12. 如有工具调用，发送 `tool_call_created` / `tool_call_updated`。
+13. 正常完成后更新 assistant message 为 `done`，发送 `message_done`。
+14. stream 开始后失败时，更新 assistant message 为 `failed`，发送 `message_failed`。
+15. 关闭 stream。
+
+### active streaming 冲突
+
+如果目标 conversation 已有 active assistant message：
+
+```text
+role = assistant
+status in ['pending', 'streaming']
+```
+
+返回：
+
+```http
+HTTP/1.1 409 Conflict
+Content-Type: application/json
+```
+
+```json
+{
+  "message": "Current conversation already has an active streaming message",
+  "code": "CONVERSATION_STREAMING"
+}
+```
+
+---
+
+## 5.4 POST /api/messages/:id/retry
+
+### 用途
+
+对 failed / aborted assistant message 发起重试，创建新的 assistant message，并返回新的 SSE stream。
+
+### Request Body
+
+```ts
+type RetryMessageRequest = {
+  profileId?: string
+  mode?: string
+
+  mock?: {
+    delayMs?: number
+    failAtChunk?: number
+    triggerTools?: boolean
+  }
+}
+```
+
+### Response
+
+成功时返回：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream; charset=utf-8
+```
+
+并使用与 `POST /api/chat` 相同的 `ChatStreamEvent`。
+
+### 规则
+
+- 只允许 retry `failed` / `aborted` assistant message。
+- 不覆盖旧 message。
+- 创建新的 assistant message。
+- 新 assistant message 的 `parentMessageId` 指向同一条 user message。
+- retry 前必须检查目标 conversation 是否已有 active assistant message。
+- 如果已有，返回 `409 CONVERSATION_STREAMING`。
+- retry 使用与 `POST /api/chat` 完全相同的 SSE parser 和前端处理逻辑。
+
+---
+
+## 6. 多页面 / 多 Tab 行为边界
+
+MVP 阶段不做跨页面实时 delta 同步。
+
+明确边界：
+
+```text
+发起生成的页面：实时接 SSE delta。
+其他页面：能看到该 conversation 正在 streaming，但不实时同步 delta。
+生成完成后：其他页面通过刷新或重新拉取 messages 获得最终内容。
+```
+
+实现方式：
+
+- `GET /api/conversations` 返回 `isStreaming` / `activeAssistantMessageId`，用于左侧会话列表展示生成中状态。
+- `GET /api/conversations/:id` 返回 `isStreaming` / `activeAssistantMessageId`，用于进入会话时判断状态。
+- `GET /api/conversations/:id/messages` 返回数据库中已落库的消息，不保证包含 streaming 中的 partial content。
+- 不提供独立 `GET /api/conversations/:id/status` 接口。
+- 不提供 `GET /api/conversations/:id/events` 订阅接口。
+- 不做 BroadcastChannel / WebSocket / 多端实时同步。
+
+---
+
+## 7. 前端处理要求
+
+### 7.1 Store 分工
+
+```text
+conversationStore:
+- conversations
+- activeConversationId
+- messagesByConversationId
+- appendMessage
+- appendMessageDelta
+- replaceMessage
+- markMessageDone
+- markMessageFailed
+- markMessageAborted
+
+chatRuntimeStore:
+- conversationStates
+- streamId
+- isStreaming
+- streamingMessageId
+- abortController
+- runtime error
+
+profileStore:
+- currentProfileId
+- profiles
+```
+
+### 7.2 SSE Event 处理
+
+前端 `useChatStream` 收到 SSE event 后：
+
+| event | 前端动作 |
+|---|---|
+| `message_created` | 插入 userMessage 和 assistantMessage；记录 streamId / streamingMessageId |
+| `text_delta` | 按 conversationId + messageId 追加 delta |
+| `tool_call_created` | 插入或更新对应 message 的 ToolCall |
+| `tool_call_updated` | 更新对应 message 的 ToolCall |
+| `message_done` | 用后端最终 message 覆盖本地 message；清理 runtime |
+| `message_failed` | 用 failed message 覆盖本地 message；保存错误；清理 runtime |
+
+### 7.3 防止事件写错 Conversation
+
+前端处理 SSE event 时必须使用 event 中的：
+
+- `streamId`
+- `conversationId`
+- `messageId`
+
+不要默认写入当前 active conversation。
+
+原因：
+
+- 用户可能在 stream 过程中切换 conversation。
+- 不同 conversation 可以同时 streaming。
+- 多个 stream event 可能交错到达。
+
+---
+
+## 8. Harness 复用要求
+
+Harness 需要复用同一套 SSE parser。
+
+建议封装：
+
+```ts
+readSseStream(response): Promise<ChatStreamEvent[]>
+```
+
+要求：
+
+- 按标准 SSE frame 解析
+- 校验 `event` 和 `data.type` 一致
+- 收集所有 ChatStreamEvent
+- 支持超时
+- 支持中断
+- 失败时输出原始 SSE 片段，便于定位
+
+V2、V3、V4、V5、V9 Harness 都必须复用该 parser。
+
+---
+
+## 9. 第一阶段不提供的接口
+
+第一阶段不提供：
+
+- 登录注册
+- 用户权限
+- Organization
+- 文件上传
+- RAG 检索接口
+- 真实 MCP 接入接口
+- WebSocket
+- 跨页面实时 delta 同步接口
+- `GET /api/conversations/:id/status`
+- `GET /api/conversations/:id/events`
+- 任意工具执行接口
+- 高风险工具接口
+- 物理删除 Conversation 接口
+

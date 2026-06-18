@@ -1,5 +1,3 @@
-import { createError } from 'h3'
-
 export type ApiErrorCode =
   | 'BAD_REQUEST'
   | 'NOT_FOUND'
@@ -36,6 +34,10 @@ export class AppApiError extends Error {
   }
 }
 
+export const isAppApiError = (error: unknown): error is AppApiError => {
+  return error instanceof AppApiError
+}
+
 export const toApiErrorResponse = (error: AppApiError): ApiErrorResponse => ({
   code: error.code,
   details: error.details,
@@ -43,13 +45,7 @@ export const toApiErrorResponse = (error: AppApiError): ApiErrorResponse => ({
 })
 
 export const createApiError = (input: ApiErrorInput) => {
-  const error = new AppApiError(input)
-
-  return createError({
-    data: toApiErrorResponse(error),
-    statusCode: error.statusCode,
-    statusMessage: error.message,
-  })
+  return new AppApiError(input)
 }
 
 export const badRequest = (message: string, details?: unknown) =>

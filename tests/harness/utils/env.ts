@@ -29,6 +29,7 @@ export const loadHarnessEnv = (): HarnessEnv => {
 
 export const createHarnessProcessEnv = (env: HarnessEnv) => ({
   ...process.env,
+  AI_CHAT_LOG_LEVEL: process.env.AI_CHAT_LOG_LEVEL ?? 'info',
   DATABASE_URL: env.testDatabaseUrl,
   TEST_DATABASE_URL: env.testDatabaseUrl,
 })

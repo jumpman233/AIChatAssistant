@@ -27,6 +27,16 @@ pnpm dev
 http://localhost:3000
 ```
 
+### 1. 启动数据库
+
+```powershell
+$env:PG_BIN = "E:\software\postgreSQL\postgresql-18.3-3-windows-x64-binaries\pgsql\bin"
+$env:PG_DATA = "E:\software\postgreSQL\postgresql-18.3-3-windows-x64-binaries\pgsql\data"
+
+& "$env:PG_BIN\pg_ctl.exe" -D "$env:PG_DATA" -l "$env:PG_DATA\postgresql.log" start
+& "$env:PG_BIN\pg_isready.exe" -h 127.0.0.1 -p 5432
+```
+
 ## 目录结构
 
 ```text

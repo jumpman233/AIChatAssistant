@@ -1,11 +1,4 @@
-export type TypewriterRuntimeState = {
-  messageId: string
-  rawContent: string
-  displayContent: string
-  pendingText: string
-  isTyping: boolean
-  timerId: ReturnType<typeof setTimeout> | null
-}
+import type { TypewriterRuntimeState } from '~/types/chat'
 
 export type DrainTypewriterOptions = {
   done?: boolean

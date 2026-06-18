@@ -1,14 +1,11 @@
-import type { ChatStreamEventData } from '../types/api'
-import { createHarnessLogger } from './harness-log'
+import type { ChatStreamEvent } from '~/types/chat'
 
-export type HarnessSseEvent<TData = ChatStreamEventData> = {
+export type ParsedChatStreamEvent = {
   id: string | null
   event: string
-  data: TData
+  data: ChatStreamEvent
   raw: string
 }
-
-const harnessStreamLog = createHarnessLogger('stream-client')
 
 type ParsedFrame = {
   id: string | null
@@ -17,40 +14,16 @@ type ParsedFrame = {
   raw: string
 }
 
-export class SseParseError extends Error {
+export class ChatStreamParseError extends Error {
   rawBuffer: string
   rawChunk?: string
 
   constructor(message: string, options: { rawBuffer: string; rawChunk?: string }) {
     super(message)
-    this.name = 'SseParseError'
+    this.name = 'ChatStreamParseError'
     this.rawBuffer = options.rawBuffer
     this.rawChunk = options.rawChunk
   }
-}
-
-const summarizeRawText = (value: string) => ({
-  containsDataLine: /^data:/m.test(value),
-  containsEventLine: /^event:/m.test(value),
-  containsIdLine: /^id:/m.test(value),
-  frameSeparatorCount: value.match(/\n\n/g)?.length ?? 0,
-  length: value.length,
-  lineCount: value.length === 0 ? 0 : value.split(/\r?\n/).length,
-})
-
-const logParseFailure = (error: unknown) => {
-  if (error instanceof SseParseError) {
-    harnessStreamLog.error('SSE parse failed', {
-      message: error.message,
-      rawBufferSummary: summarizeRawText(error.rawBuffer),
-      rawFrameSummary: error.rawChunk ? summarizeRawText(error.rawChunk) : null,
-    })
-    return
-  }
-
-  harnessStreamLog.error('SSE parse failed', {
-    error,
-  })
 }
 
 const parseFrame = (raw: string): ParsedFrame | null => {
@@ -88,16 +61,16 @@ const parseFrame = (raw: string): ParsedFrame | null => {
   }
 }
 
-const parseEvent = (frame: ParsedFrame, rawBuffer: string): HarnessSseEvent => {
+const parseEvent = (frame: ParsedFrame, rawBuffer: string): ParsedChatStreamEvent => {
   if (!frame.event) {
-    throw new SseParseError('SSE frame is missing event field', {
+    throw new ChatStreamParseError('SSE frame is missing event field', {
       rawBuffer,
       rawChunk: frame.raw,
     })
   }
 
   if (!frame.data) {
-    throw new SseParseError('SSE frame is missing data field', {
+    throw new ChatStreamParseError('SSE frame is missing data field', {
       rawBuffer,
       rawChunk: frame.raw,
     })
@@ -108,14 +81,14 @@ const parseEvent = (frame: ParsedFrame, rawBuffer: string): HarnessSseEvent => {
   try {
     data = JSON.parse(frame.data)
   } catch (error) {
-    throw new SseParseError(`SSE frame data is not valid JSON: ${String(error)}`, {
+    throw new ChatStreamParseError(`SSE frame data is not valid JSON: ${String(error)}`, {
       rawBuffer,
       rawChunk: frame.raw,
     })
   }
 
   if (typeof data !== 'object' || data === null || !('type' in data)) {
-    throw new SseParseError('SSE frame data must contain type', {
+    throw new ChatStreamParseError('SSE frame data must contain type', {
       rawBuffer,
       rawChunk: frame.raw,
     })
@@ -124,7 +97,7 @@ const parseEvent = (frame: ParsedFrame, rawBuffer: string): HarnessSseEvent => {
   const eventData = data as { type: string }
 
   if (frame.event !== eventData.type) {
-    throw new SseParseError(
+    throw new ChatStreamParseError(
       `SSE event "${frame.event}" does not match data.type "${eventData.type}"`,
       {
         rawBuffer,
@@ -134,17 +107,17 @@ const parseEvent = (frame: ParsedFrame, rawBuffer: string): HarnessSseEvent => {
   }
 
   return {
-    data: data as ChatStreamEventData,
+    data: data as ChatStreamEvent,
     event: frame.event,
     id: frame.id,
     raw: frame.raw,
   }
 }
 
-export const parseSseChunk = (input: {
+const parseSseChunk = (input: {
   buffer: string
   chunk: string
-  events: HarnessSseEvent[]
+  onEvent: (event: ParsedChatStreamEvent) => void
 }) => {
   const rawBuffer = input.buffer + input.chunk
   const normalizedBuffer = rawBuffer.replace(/\r\n/g, '\n')
@@ -154,41 +127,26 @@ export const parseSseChunk = (input: {
   for (const rawFrame of frames) {
     const frame = parseFrame(rawFrame)
 
-    if (!frame) {
-      continue
+    if (frame) {
+      input.onEvent(parseEvent(frame, rawBuffer))
     }
-
-    input.events.push(parseEvent(frame, rawBuffer))
   }
 
   return remainingBuffer
 }
 
-const parseSseChunkWithLog = (input: {
-  buffer: string
-  chunk: string
-  events: HarnessSseEvent[]
-}) => {
-  try {
-    return parseSseChunk(input)
-  } catch (error) {
-    logParseFailure(error)
-    throw error
-  }
-}
-
-export const readSseStream = async (response: Response) => {
+export const readChatSseStream = async (
+  response: Response,
+  onEvent: (event: ParsedChatStreamEvent) => void,
+) => {
   if (!response.body) {
-    const error = new SseParseError('SSE response body is empty', {
+    throw new ChatStreamParseError('SSE response body is empty', {
       rawBuffer: '',
     })
-    logParseFailure(error)
-    throw error
   }
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  const events: HarnessSseEvent[] = []
   let buffer = ''
 
   while (true) {
@@ -201,20 +159,20 @@ export const readSseStream = async (response: Response) => {
     const chunk = decoder.decode(result.value, {
       stream: true,
     })
-    buffer = parseSseChunkWithLog({
+    buffer = parseSseChunk({
       buffer,
       chunk,
-      events,
+      onEvent,
     })
   }
 
   const tail = decoder.decode()
 
   if (tail) {
-    buffer = parseSseChunkWithLog({
+    buffer = parseSseChunk({
       buffer,
       chunk: tail,
-      events,
+      onEvent,
     })
   }
 
@@ -222,25 +180,11 @@ export const readSseStream = async (response: Response) => {
     const frame = parseFrame(buffer)
 
     if (!frame) {
-      const error = new SseParseError('SSE stream ended with an incomplete frame', {
+      throw new ChatStreamParseError('SSE stream ended with an incomplete frame', {
         rawBuffer: buffer,
       })
-      logParseFailure(error)
-      throw error
     }
 
-    try {
-      events.push(parseEvent(frame, buffer))
-    } catch (error) {
-      logParseFailure(error)
-      throw error
-    }
+    onEvent(parseEvent(frame, buffer))
   }
-
-  harnessStreamLog.debug('SSE stream parsed', {
-    eventCount: events.length,
-    eventTypes: events.map((event) => event.event),
-  })
-
-  return events
 }

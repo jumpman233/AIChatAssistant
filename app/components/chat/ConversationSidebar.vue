@@ -61,7 +61,7 @@ const emit = defineEmits<{
       <span class="conversation-sidebar__status-dot" aria-hidden="true" />
       <div>
         <strong>Local MVP</strong>
-        <span>V1 仅启用会话与消息读取</span>
+        <span>V2 已启用 mock stream</span>
       </div>
     </div>
   </aside>

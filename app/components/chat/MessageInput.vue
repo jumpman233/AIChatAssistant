@@ -1,10 +1,51 @@
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   disabled?: boolean
-  reason?: string
+  pending?: boolean
+  reason?: string | null
+  streaming?: boolean
+}>()
+
+const emit = defineEmits<{
+  send: [content: string]
 }>()
 
 const draft = ref('')
+
+const canSend = computed(() => {
+  return !props.disabled && !props.pending && !props.streaming && draft.value.trim().length > 0
+})
+
+const helperText = computed(() => {
+  if (props.reason) {
+    return props.reason
+  }
+
+  if (props.streaming) {
+    return '当前会话正在生成中，可以继续编辑草稿，完成后再发送。'
+  }
+
+  return 'Enter 发送，Shift + Enter 换行。'
+})
+
+const submit = () => {
+  if (!canSend.value) {
+    return
+  }
+
+  const content = draft.value.trim()
+  draft.value = ''
+  emit('send', content)
+}
+
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key !== 'Enter' || event.shiftKey) {
+    return
+  }
+
+  event.preventDefault()
+  submit()
+}
 </script>
 
 <template>
@@ -12,13 +53,18 @@ const draft = ref('')
     <textarea
       v-model="draft"
       :disabled="disabled"
-      placeholder="输入消息，V2 将支持发送"
+      placeholder="输入消息，Enter 发送"
       rows="4"
+      @keydown="handleKeydown"
     />
     <div class="message-input__footer">
-      <span>{{ reason ?? 'V1 仅支持会话与历史消息读取，不发送消息。' }}</span>
-      <button disabled type="button">
-        V2 支持发送
+      <span>{{ helperText }}</span>
+      <button
+        :disabled="!canSend"
+        type="button"
+        @click="submit"
+      >
+        {{ streaming ? '生成中' : '发送' }}
       </button>
     </div>
   </section>
@@ -68,6 +114,15 @@ button {
   color: #fff;
   padding: 0 18px;
   font-weight: 800;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+button:hover:not(:disabled) {
+  background: #1f2937;
 }
 
 @media (max-width: 640px) {

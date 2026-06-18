@@ -45,6 +45,64 @@ export const useConversationStore = defineStore('conversation', () => {
     }
   }
 
+  const appendMessage = (conversationId: string, message: MessageDTO) => {
+    const currentMessages = messagesByConversationId.value[conversationId] ?? []
+    const nextMessages = [
+      ...currentMessages.filter((item) => item.id !== message.id),
+      message,
+    ].sort((a, b) => a.seq - b.seq)
+
+    messagesByConversationId.value = {
+      ...messagesByConversationId.value,
+      [conversationId]: nextMessages,
+    }
+  }
+
+  const replaceMessage = (conversationId: string, message: MessageDTO) => {
+    const currentMessages = messagesByConversationId.value[conversationId] ?? []
+    const exists = currentMessages.some((item) => item.id === message.id)
+    const nextMessages = exists
+      ? currentMessages.map((item) => (item.id === message.id ? message : item))
+      : [...currentMessages, message]
+
+    messagesByConversationId.value = {
+      ...messagesByConversationId.value,
+      [conversationId]: nextMessages.sort((a, b) => a.seq - b.seq),
+    }
+  }
+
+  const appendMessageDelta = (conversationId: string, messageId: string, delta: string) => {
+    const currentMessages = messagesByConversationId.value[conversationId] ?? []
+
+    messagesByConversationId.value = {
+      ...messagesByConversationId.value,
+      [conversationId]: currentMessages.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              content: message.content + delta,
+            }
+          : message,
+      ),
+    }
+  }
+
+  const setConversationStreaming = (
+    conversationId: string,
+    isStreaming: boolean,
+    activeAssistantMessageId: string | null,
+  ) => {
+    conversations.value = conversations.value.map((conversation) =>
+      conversation.id === conversationId
+        ? {
+            ...conversation,
+            activeAssistantMessageId,
+            isStreaming,
+          }
+        : conversation,
+    )
+  }
+
   const loadConversations = async () => {
     pending.value = true
     error.value = null
@@ -161,6 +219,8 @@ export const useConversationStore = defineStore('conversation', () => {
     activeConversation,
     activeConversationId,
     activeMessages,
+    appendMessage,
+    appendMessageDelta,
     conversations,
     createConversation,
     deleteConversation,
@@ -171,7 +231,9 @@ export const useConversationStore = defineStore('conversation', () => {
     messagesByConversationId,
     messagesPending,
     pending,
+    replaceMessage,
     selectConversation,
+    setConversationStreaming,
     setMessages,
   }
 })

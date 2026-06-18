@@ -3,6 +3,9 @@ import type { MessageDTO } from '~/types/chat'
 
 const props = defineProps<{
   message: MessageDTO
+  displayContent?: string | null
+  isStreaming?: boolean
+  isTyping?: boolean
 }>()
 
 const roleLabel = computed(() => {
@@ -16,6 +19,14 @@ const roleLabel = computed(() => {
 
   return props.message.role
 })
+
+const visibleContent = computed(() => {
+  return props.displayContent ?? props.message.content
+})
+
+const shouldRenderAsStreaming = computed(() => {
+  return Boolean(props.isStreaming || props.isTyping || props.message.status === 'streaming')
+})
 </script>
 
 <template>
@@ -25,9 +36,12 @@ const roleLabel = computed(() => {
       <span>{{ message.status }}</span>
     </div>
 
-    <MarkdownRenderer :content="message.content || '（空消息）'" />
+    <MarkdownRenderer
+      :content="visibleContent || '（空消息）'"
+      :is-streaming="shouldRenderAsStreaming"
+    />
 
-    <div v-if="message.status === 'streaming'" class="message__status">
+    <div v-if="message.status === 'streaming' || isStreaming || isTyping" class="message__status">
       <StreamingIndicator />
       <span>生成中</span>
     </div>

@@ -24,7 +24,7 @@ const profileDescription = computed(() => {
 
     <div class="chat-header__meta">
       <span class="chat-header__pill">mode: {{ modeLabel }}</span>
-      <span class="chat-header__pill chat-header__pill--muted">V1 Storage</span>
+      <span class="chat-header__pill chat-header__pill--muted">V2 Mock Stream</span>
     </div>
 
     <p class="chat-header__description">

@@ -1,70 +1,150 @@
-import type { MessageDTO } from '~/types/chat'
+import type { ApiErrorResponse, ChatStreamEvent, CreateChatRequest } from '~/types/chat'
+import { readChatSseStream } from '~/utils/stream'
+
+export type SendMessageInput = {
+  conversationId: string
+  profileId?: string
+  mode?: string
+  content: string
+}
+
+const readJsonError = async (response: Response): Promise<ApiErrorResponse> => {
+  try {
+    return (await response.json()) as ApiErrorResponse
+  } catch {
+    return {
+      message: `Request failed with HTTP ${response.status}`,
+    }
+  }
+}
 
 export const useChatStream = () => {
-  const { activeConversationId, activeState, addLocalMessage, createLocalConversation } =
-    useConversation()
-  const { currentProfileId } = useProfiles()
+  const conversationStore = useConversationStore()
+  const runtimeStore = useChatRuntimeStore()
 
-  const sendLocalMessage = (content: string) => {
-    const normalizedContent = content.trim()
+  const handleStreamEvent = (event: ChatStreamEvent) => {
+    switch (event.type) {
+      case 'message_created': {
+        conversationStore.appendMessage(event.conversationId, event.userMessage)
+        conversationStore.appendMessage(event.conversationId, event.assistantMessage)
+        conversationStore.setConversationStreaming(
+          event.conversationId,
+          true,
+          event.assistantMessage.id,
+        )
+        runtimeStore.attachStream({
+          conversationId: event.conversationId,
+          initialContent: event.assistantMessage.content,
+          messageId: event.assistantMessage.id,
+          streamId: event.streamId,
+        })
+        break
+      }
 
-    if (!normalizedContent) {
+      case 'text_delta': {
+        const runtime = runtimeStore.getRuntimeState(event.conversationId)
+
+        if (runtime?.streamId && runtime.streamId !== event.streamId) {
+          return
+        }
+
+        runtimeStore.appendDelta(event.conversationId, event.messageId, event.delta)
+        break
+      }
+
+      case 'message_done': {
+        conversationStore.replaceMessage(event.conversationId, event.message)
+        conversationStore.setConversationStreaming(event.conversationId, false, null)
+        runtimeStore.finishStream({
+          conversationId: event.conversationId,
+          finalContent: event.message.content,
+          messageId: event.message.id,
+        })
+        break
+      }
+
+      case 'message_failed': {
+        conversationStore.replaceMessage(event.conversationId, event.message)
+        conversationStore.setConversationStreaming(event.conversationId, false, null)
+        runtimeStore.finishStream({
+          conversationId: event.conversationId,
+          error: event.error.message,
+          finalContent: event.message.content,
+          messageId: event.message.id,
+        })
+        break
+      }
+
+      case 'tool_call_created':
+      case 'tool_call_updated':
+        break
+    }
+  }
+
+  const sendMessage = async (input: SendMessageInput) => {
+    const normalizedContent = input.content.trim()
+
+    if (!normalizedContent || runtimeStore.isConversationStreaming(input.conversationId)) {
       return
     }
 
-    const conversation =
-      activeConversationId.value === null
-        ? createLocalConversation(currentProfileId.value)
-        : null
-    const conversationId = activeConversationId.value ?? conversation?.id
+    const abortController = new AbortController()
+    runtimeStore.startStream(input.conversationId, abortController)
+    conversationStore.setConversationStreaming(input.conversationId, true, null)
 
-    if (!conversationId) {
-      return
-    }
-
-    const state = activeState.value
-    const now = new Date().toISOString()
-    const nextSeq = (state?.messages.at(-1)?.seq ?? 0) + 1
-    const userMessage: MessageDTO = {
+    const requestBody: CreateChatRequest = {
       content: normalizedContent,
-      conversationId,
-      createdAt: now,
-      errorMessage: null,
-      id: `local-message-${crypto.randomUUID()}`,
-      metadata: null,
-      mode: 'chat',
-      model: null,
-      parentMessageId: null,
-      profileId: currentProfileId.value,
-      role: 'user',
-      seq: nextSeq,
-      status: 'done',
-      toolCalls: [],
-      updatedAt: now,
-    }
-    const assistantMessage: MessageDTO = {
-      content: '基础项目骨架已经就绪。下一步可以接入 /api/chat 的 mock stream 主链路。',
-      conversationId,
-      createdAt: now,
-      errorMessage: null,
-      id: `local-message-${crypto.randomUUID()}`,
-      metadata: null,
-      mode: 'chat',
-      model: 'local-placeholder',
-      parentMessageId: userMessage.id,
-      profileId: currentProfileId.value,
-      role: 'assistant',
-      seq: nextSeq + 1,
-      status: 'done',
-      toolCalls: [],
-      updatedAt: now,
+      conversationId: input.conversationId,
+      mode: input.mode,
+      profileId: input.profileId,
     }
 
-    addLocalMessage(conversationId, userMessage)
-    addLocalMessage(conversationId, assistantMessage)
+    try {
+      const response = await fetch('/api/chat', {
+        body: JSON.stringify(requestBody),
+        headers: {
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+        signal: abortController.signal,
+      })
+
+      if (!response.ok) {
+        const error = await readJsonError(response)
+        runtimeStore.failBeforeStream(input.conversationId, error.message)
+        conversationStore.setConversationStreaming(input.conversationId, false, null)
+        return
+      }
+
+      const contentType = response.headers.get('content-type') ?? ''
+
+      if (!contentType.includes('text/event-stream')) {
+        runtimeStore.failBeforeStream(
+          input.conversationId,
+          'Server did not return a text/event-stream response',
+        )
+        conversationStore.setConversationStreaming(input.conversationId, false, null)
+        return
+      }
+
+      await readChatSseStream(response, ({ data }) => {
+        handleStreamEvent(data)
+      })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+
+      runtimeStore.failBeforeStream(
+        input.conversationId,
+        error instanceof Error ? error.message : 'Stream request failed',
+      )
+      conversationStore.setConversationStreaming(input.conversationId, false, null)
+    }
   }
 
   return {
-    sendLocalMessage,
+    sendMessage,
   }
 }

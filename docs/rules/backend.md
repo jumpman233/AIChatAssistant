@@ -131,6 +131,36 @@ type ToolDefinition = {
 4. 完成后一次性保存完整内容，状态改为 `done`
 5. 停止或失败时保存当前已有内容，状态改为 `aborted` 或 `failed`
 
+## 后端可读日志规范
+
+后端 service 层应在关键状态节点输出可读日志，帮助开发者理解业务链路。
+
+规则：
+
+1. 日志应集中在 service / stream / harness 辅助工具中，不要散落在每个 repository 或每个组件里。
+2. Route handler 保持薄层，除非处理框架级异常，否则不承担主要日志逻辑。
+3. 后端日志重点记录：
+   * request start
+   * conversationId / messageId / streamId
+   * active streaming guard 结果
+   * user message / assistant message 创建结果
+   * seq 分配结果
+   * SSE event 类型摘要
+   * done / failed 状态落库结果
+4. 不要打印完整 prompt、完整 assistant content、用户隐私内容或大段 delta。
+5. 对 `text_delta` 只记录：
+   * delta index
+   * delta length
+   * fullContent length
+   不记录完整 delta 文本。
+6. 日志必须可关闭或可降噪。
+7. 建议通过环境变量控制：
+   * `AI_CHAT_LOG_LEVEL=debug|info|warn|error|silent`
+   * `AI_CHAT_HARNESS_VERBOSE=true|false`
+8. 开发环境可以输出 info/debug；测试和生产默认不应输出大量 debug。
+9. 不要为了日志污染业务逻辑。日志辅助函数应保持轻量、无副作用。
+10. 失败日志要包含足够定位信息，但不要泄露敏感内容。
+
 ## 错误返回规范
 
 接口错误返回保持统一：

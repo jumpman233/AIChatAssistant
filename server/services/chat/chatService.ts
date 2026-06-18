@@ -4,6 +4,7 @@ import { toMessageDTO } from '../../mappers/chatMappers'
 import { conversationRepository } from '../../repositories/conversationRepository'
 import { messageRepository } from '../../repositories/messageRepository'
 import { badRequest, conflict, createApiError, notFound } from '../../utils/apiError'
+import { logger } from '../../utils/logger'
 import { createSseFrame } from '../../utils/sse'
 import type { CreateChatInput } from '../../validators/chat'
 import { createMockStream } from './mockStreamService'
@@ -64,6 +65,27 @@ const createStreamWriter = (controller: ReadableStreamDefaultController<Uint8Arr
     })
 
     controller.enqueue(encoder.encode(frame))
+
+    const eventMeta = {
+      event: event.type,
+      eventSeq,
+      streamId: event.streamId,
+    }
+
+    if (event.type === 'message_failed') {
+      logger.warn('sse sent', eventMeta)
+      return
+    }
+
+    if (event.type === 'text_delta') {
+      logger.debug('sse sent', {
+        ...eventMeta,
+        deltaLength: event.delta.length,
+      })
+      return
+    }
+
+    logger.info('sse sent', eventMeta)
   }
 }
 
@@ -95,15 +117,30 @@ export const chatService = {
       })
     }
 
+    const profileId = input.profileId ?? conversation.profileId
+    const mode = input.mode ?? conversation.mode
+
+    logger.info('start', {
+      conversationId: conversation.id,
+      mode,
+      profileId,
+    })
+
     if (conversation.messages?.[0]) {
+      logger.warn('active guard blocked', {
+        activeAssistantMessageId: conversation.messages[0].id,
+        conversationId: conversation.id,
+      })
       throw conflict(
         'Current conversation already has an active streaming message',
         'CONVERSATION_STREAMING',
       )
     }
 
-    const profileId = input.profileId ?? conversation.profileId
-    const mode = input.mode ?? conversation.mode
+    logger.info('active guard passed', {
+      conversationId: conversation.id,
+    })
+
     assertProfileMode(profileId, mode)
 
     const streamId = toStreamId()
@@ -115,6 +152,15 @@ export const chatService = {
     })
     const userMessageDTO = toMessageDTO(userMessage)
     const initialAssistantMessageDTO = toMessageDTO(assistantMessage)
+
+    logger.info('messages created', {
+      assistantMessageId: assistantMessage.id,
+      assistantSeq: assistantMessage.seq,
+      conversationId: conversation.id,
+      streamId,
+      userMessageId: userMessage.id,
+      userSeq: userMessage.seq,
+    })
 
     return new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -132,6 +178,13 @@ export const chatService = {
 
           for await (const chunk of createMockStream(input.mock)) {
             fullContent += chunk.delta
+            logger.info('delta', {
+              assistantMessageId: assistantMessage.id,
+              deltaIndex: chunk.index,
+              deltaLength: chunk.delta.length,
+              fullContentLength: fullContent.length,
+              streamId,
+            })
             writeEvent({
               conversationId: conversation.id,
               delta: chunk.delta,
@@ -144,6 +197,12 @@ export const chatService = {
           const doneMessage = await messageRepository.updateAssistantMessageDone({
             content: fullContent,
             messageId: assistantMessage.id,
+          })
+
+          logger.info('assistant done', {
+            contentLength: fullContent.length,
+            messageId: assistantMessage.id,
+            streamId,
           })
 
           writeEvent({
@@ -159,6 +218,14 @@ export const chatService = {
             content: fullContent,
             errorMessage,
             messageId: assistantMessage.id,
+          })
+
+          logger.error('failed', {
+            assistantMessageId: assistantMessage.id,
+            contentLength: fullContent.length,
+            errorMessage,
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+            streamId,
           })
 
           writeEvent({

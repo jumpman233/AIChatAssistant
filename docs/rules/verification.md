@@ -18,6 +18,30 @@
 * V2 以后涉及流式响应的验证必须复用统一 stream client，能够收集 `message_created`、`text_delta`、`tool_call_created`、`tool_call_updated`、`message_done`、`message_failed`，并支持超时和失败时输出原始片段。
 * 涉及数据库断言时，应同时验证 API 行为和数据库状态，尤其是 soft delete、message status、seq、ToolCall status、retry 是否创建新消息、旧消息是否保留。
 
+## Harness 日志规范
+
+Harness 场景应输出清晰阶段日志，便于开发者理解验证过程。
+
+规则：
+
+1. Harness 日志可以比业务日志更详细，但仍不应打印敏感完整内容。
+2. Harness 应至少在关键步骤输出：
+   * 准备测试数据库
+   * 启动测试服务
+   * 创建 conversation
+   * 调用目标 API
+   * SSE event 顺序摘要
+   * API assert 完成
+   * DB assert 完成
+   * scenario passed
+3. SSE stream-client 失败时应输出 raw frame / raw buffer 摘要，方便定位解析问题。
+4. Harness 日志必须说明使用的是 `TEST_DATABASE_URL`，并确认没有 fallback 到 `DATABASE_URL`。
+5. Harness 的 verbose 日志建议由 `AI_CHAT_HARNESS_VERBOSE=true` 控制。
+6. 验证命令最终输出中仍要保留：
+   * 实际运行命令
+   * 未运行命令及原因
+   * 是否通过
+
 ## Harness API 契约类型
 
 * Harness 中与 API 契约对应的 DTO、response、SSE event data 类型统一放在 `tests/harness/types/api.ts`。

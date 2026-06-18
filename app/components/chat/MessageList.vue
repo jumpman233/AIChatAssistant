@@ -12,12 +12,28 @@ const emit = defineEmits<{
 }>()
 
 const listEl = ref<HTMLElement | null>(null)
+const chatRuntimeStore = useChatRuntimeStore()
 
 const sortedMessages = computed(() => {
   return [...props.messages].sort((a, b) => a.seq - b.seq)
 })
 
-const scrollToBottom = async () => {
+const isNearBottom = () => {
+  if (!listEl.value) {
+    return true
+  }
+
+  const threshold = 96
+  return (
+    listEl.value.scrollHeight - listEl.value.scrollTop - listEl.value.clientHeight < threshold
+  )
+}
+
+const scrollToBottom = async (force = false) => {
+  if (!force && !isNearBottom()) {
+    return
+  }
+
   await nextTick()
 
   if (listEl.value) {
@@ -26,9 +42,19 @@ const scrollToBottom = async () => {
 }
 
 watch(
-  () => [props.hasActiveConversation, sortedMessages.value.length],
+  () => [props.hasActiveConversation, sortedMessages.value.length, chatRuntimeStore.renderTick],
   () => {
     void scrollToBottom()
+  },
+  {
+    flush: 'post',
+  },
+)
+
+watch(
+  () => props.hasActiveConversation,
+  () => {
+    void scrollToBottom(true)
   },
   {
     flush: 'post',
@@ -47,7 +73,7 @@ watch(
     <div v-else-if="!hasActiveConversation" class="message-list__state">
       <span class="message-list__icon" aria-hidden="true">+</span>
       <h2>开始一次 AI 对话</h2>
-      <p>先创建一个会话。V1 只负责会话与消息存储骨架，发送消息将在 V2 接入。</p>
+      <p>先创建一个会话，然后在底部输入区发送消息。</p>
       <button type="button" @click="emit('createConversation')">
         新建会话
       </button>
@@ -56,13 +82,16 @@ watch(
     <div v-else-if="sortedMessages.length === 0" class="message-list__state">
       <span class="message-list__icon" aria-hidden="true">›_</span>
       <h2>当前会话还没有消息</h2>
-      <p>会话已经创建，底部输入区会在 V2 支持发送消息。</p>
+      <p>会话已经创建，可以在底部输入区发送第一条消息。</p>
     </div>
 
     <div v-else class="message-list__items">
       <MessageItem
         v-for="message in sortedMessages"
         :key="message.id"
+        :display-content="chatRuntimeStore.getTypewriter(message.id)?.displayContent"
+        :is-streaming="chatRuntimeStore.isMessageStreaming(message.conversationId, message.id)"
+        :is-typing="chatRuntimeStore.isMessageTyping(message.id)"
         :message="message"
       />
     </div>

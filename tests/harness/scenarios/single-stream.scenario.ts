@@ -10,6 +10,7 @@ import type {
 import { ApiClient } from '../utils/api-client'
 import { assert, assertArray, assertEqual } from '../utils/assert'
 import { prepareTestDatabase } from '../utils/db'
+import { harnessLog } from '../utils/harness-log'
 import { readSseStream, type HarnessSseEvent } from '../utils/stream-client'
 import { startTestServer, type TestServer } from '../utils/server'
 import { testMode, testProfileId, v2SingleStreamPrompt } from '../utils/test-data'
@@ -59,13 +60,41 @@ const assertNoDuplicateSeq = (messages: Array<{ seq: number }>) => {
   assertEqual(uniqueSeqs.size, seqs.length, 'Expected message seq values to be unique')
 }
 
+const summarizeEventTypes = (eventTypes: string[]) => {
+  const parts: string[] = []
+
+  for (const eventType of eventTypes) {
+    const lastPart = parts.at(-1)
+    const match = lastPart?.match(/^(.+?) x(\d+)$/)
+    const lastEventType = match?.[1] ?? lastPart
+    const lastCount = match ? Number(match[2]) : 1
+
+    if (lastEventType === eventType) {
+      parts[parts.length - 1] = `${eventType} x${lastCount + 1}`
+      continue
+    }
+
+    parts.push(eventType)
+  }
+
+  return parts.join(' -> ')
+}
+
 const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
+  harnessLog.step('create conversation')
   const conversation = await api.post<ConversationDTO>('/api/conversations', {
     mode: testMode,
     profileId: testProfileId,
     title: 'V2 Harness Single Stream',
   })
 
+  harnessLog.debug('conversation created', {
+    conversationId: conversation.id,
+    mode: conversation.mode,
+    profileId: conversation.profileId,
+  })
+
+  harnessLog.step('POST /api/chat')
   const response = await api.postRaw('/api/chat', {
     content: v2SingleStreamPrompt,
     conversationId: conversation.id,
@@ -84,6 +113,7 @@ const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
 
   const events = await readSseStream(response)
   const eventTypes = events.map((event) => event.event)
+  harnessLog.step(`stream events: ${summarizeEventTypes(eventTypes)}`)
 
   assert(eventTypes.includes('message_created'), 'Expected message_created event')
   assert(eventTypes.includes('text_delta'), 'Expected at least one text_delta event')
@@ -131,6 +161,10 @@ const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
 
   const textDeltaEvents = events.filter(isTextDeltaEvent)
   const streamContent = textDeltaEvents.map((event) => event.data.delta).join('')
+
+  harnessLog.step('stream content', {
+    length: streamContent.length,
+  })
 
   assert(streamContent.length > 0, 'Expected concatenated text_delta content to be non-empty')
 
@@ -187,6 +221,7 @@ const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
     userMessage.id,
     'Expected API assistant parentMessageId to point to user message',
   )
+  harnessLog.step('API messages checked')
 
   const dbMessages = await prisma.message.findMany({
     orderBy: {
@@ -218,7 +253,8 @@ const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
     'Expected database assistant content to equal concatenated delta content',
   )
 
-  console.log(`verify:v2 events ${eventTypes.join(' -> ')}`)
+  harnessLog.step('DB messages checked')
+  harnessLog.step('passed')
 }
 
 const main = async () => {
@@ -226,8 +262,10 @@ const main = async () => {
   let server: TestServer | null = null
 
   try {
+    harnessLog.step('prepare test database')
     const prepared = await prepareTestDatabase()
     prisma = prepared.prisma
+    harnessLog.step('start test server')
     server = await startTestServer(prepared.processEnv)
 
     const api = new ApiClient({

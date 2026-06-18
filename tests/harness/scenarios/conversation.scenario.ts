@@ -11,7 +11,10 @@ import { ApiClient } from '../utils/api-client'
 import { assert, assertArray, assertEqual } from '../utils/assert'
 import { prepareTestDatabase } from '../utils/db'
 import { assertConversationSoftDeleted } from '../utils/db-assert'
+import { createHarnessLogger } from '../utils/harness-log'
 import { startTestServer, type TestServer } from '../utils/server'
+
+const harnessLog = createHarnessLogger('verify:v1')
 
 const assertInitialConversation = (conversation: ConversationDTO) => {
   assert(conversation.id, 'Expected conversation id')
@@ -58,6 +61,7 @@ const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
   assertArray(profiles.items, 'Expected GET /api/profiles to return items array')
   assert(profiles.items.length >= 2, 'Expected at least two assistant profiles')
 
+  harnessLog.step('create conversation')
   const created = await api.post<ConversationDTO>('/api/conversations', {
     profileId: 'general',
     title: 'V1 Harness Conversation',
@@ -182,6 +186,9 @@ const runScenario = async (api: ApiClient, prisma: PrismaClient) => {
   )
 
   await assertConversationSoftDeleted(prisma, created.id)
+  harnessLog.step('API asserts checked')
+  harnessLog.step('DB asserts checked')
+  harnessLog.step('scenario passed')
 }
 
 const main = async () => {
@@ -189,8 +196,10 @@ const main = async () => {
   let server: TestServer | null = null
 
   try {
+    harnessLog.step('prepare test database')
     const prepared = await prepareTestDatabase()
     prisma = prepared.prisma
+    harnessLog.step('start test server')
     server = await startTestServer(prepared.processEnv)
 
     const api = new ApiClient({

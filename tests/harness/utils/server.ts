@@ -1,11 +1,25 @@
 import { execa, type ExecaChildProcess } from 'execa'
+import { createHarnessLogger } from './harness-log'
 
 export type TestServer = {
   baseUrl: string
   stop: () => Promise<void>
 }
 
+const harnessServerLog = createHarnessLogger('harness-server')
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const forwardChatLogs = (data: Buffer | string) => {
+  for (const line of String(data).split(/\r?\n/)) {
+    const cleanLine = line.replace(/\u001B\[[0-9;]*m/g, '')
+    const chatLogIndex = cleanLine.indexOf('[chat]')
+
+    if (chatLogIndex >= 0) {
+      console.log(cleanLine.slice(chatLogIndex))
+    }
+  }
+}
 
 const killProcessTree = async (pid: number | undefined) => {
   if (!pid || process.platform !== 'win32') {
@@ -61,6 +75,12 @@ const waitForServer = async (baseUrl: string, getOutput: () => string) => {
 export const startTestServer = async (env: NodeJS.ProcessEnv): Promise<TestServer> => {
   const port = Number(process.env.HARNESS_PORT ?? 3111)
   const baseUrl = `http://127.0.0.1:${port}`
+
+  harnessServerLog.step('start test server', {
+    baseUrl,
+    port,
+  })
+
   const child = execa('pnpm', ['exec', 'nuxt', 'dev', '--host', '127.0.0.1', '--port', String(port)], {
     env: {
       ...env,
@@ -73,10 +93,12 @@ export const startTestServer = async (env: NodeJS.ProcessEnv): Promise<TestServe
 
   child.stdout?.on('data', (data) => {
     output += String(data)
+    forwardChatLogs(data)
   })
 
   child.stderr?.on('data', (data) => {
     output += String(data)
+    forwardChatLogs(data)
   })
 
   child.catch(() => {
@@ -84,10 +106,17 @@ export const startTestServer = async (env: NodeJS.ProcessEnv): Promise<TestServe
   })
 
   await waitForServer(baseUrl, () => output)
+  harnessServerLog.info('test server ready', {
+    baseUrl,
+    port,
+  })
 
   return {
     baseUrl,
     stop: async () => {
+      harnessServerLog.debug('stop test server', {
+        port,
+      })
       child.kill('SIGTERM')
 
       const stopped = await Promise.race([

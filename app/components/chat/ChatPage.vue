@@ -3,6 +3,8 @@ import { storeToRefs } from 'pinia'
 
 const conversationStore = useConversationStore()
 const profileStore = useProfileStore()
+const chatRuntimeStore = useChatRuntimeStore()
+const { sendMessage } = useChatStream()
 
 const { currentProfile, currentProfileId } = storeToRefs(profileStore)
 const {
@@ -14,6 +16,21 @@ const {
   messagesPending,
   pending,
 } = storeToRefs(conversationStore)
+
+const activeRuntime = computed(() => {
+  return activeConversationId.value ? chatRuntimeStore.getRuntimeState(activeConversationId.value) : null
+})
+
+const isActiveConversationStreaming = computed(() => {
+  if (!activeConversationId.value) {
+    return false
+  }
+
+  return (
+    chatRuntimeStore.isConversationStreaming(activeConversationId.value) ||
+    Boolean(activeConversation.value?.isStreaming)
+  )
+})
 
 const createConversation = async () => {
   await conversationStore.createConversation(currentProfileId.value)
@@ -48,8 +65,29 @@ const inputReason = computed(() => {
     return '请先新建或选择一个会话。'
   }
 
-  return 'V1 仅支持会话创建、切换、删除和历史消息读取。发送将在 V2 支持。'
+  if (activeRuntime.value?.error) {
+    return activeRuntime.value.error
+  }
+
+  if (isActiveConversationStreaming.value) {
+    return '当前会话正在生成中，完成后可继续发送。'
+  }
+
+  return null
 })
+
+const handleSendMessage = async (content: string) => {
+  if (!activeConversation.value) {
+    return
+  }
+
+  await sendMessage({
+    content,
+    conversationId: activeConversation.value.id,
+    mode: activeConversation.value.mode,
+    profileId: activeConversation.value.profileId,
+  })
+}
 
 onMounted(async () => {
   await profileStore.loadProfiles()
@@ -86,7 +124,10 @@ onMounted(async () => {
 
       <MessageInput
         :disabled="!activeConversation"
+        :pending="pending"
         :reason="inputReason"
+        :streaming="isActiveConversationStreaming"
+        @send="handleSendMessage"
       />
     </section>
   </main>

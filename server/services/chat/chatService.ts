@@ -3,7 +3,12 @@ import { getChatProviderConfig } from '../../config/chatProviderConfig'
 import { getProfileById } from '../../profiles'
 import { toMessageDTO } from '../../mappers/chatMappers'
 import { conversationRepository } from '../../repositories/conversationRepository'
-import { messageRepository } from '../../repositories/messageRepository'
+import {
+  ActiveChatStreamError,
+  ChatMessagesConversationDeletedError,
+  ChatMessagesConversationNotFoundError,
+  messageRepository,
+} from '../../repositories/messageRepository'
 import { badRequest, conflict, createApiError, notFound } from '../../utils/apiError'
 import { logger } from '../../utils/logger'
 import { createSseFrame } from '../../utils/sse'
@@ -43,6 +48,10 @@ type ChatStreamEvent =
         code?: string
       }
     }
+
+type CreatedChatMessages = Awaited<
+  ReturnType<typeof messageRepository.createChatMessagesWithActiveGuard>
+>
 
 const encoder = new TextEncoder()
 
@@ -143,15 +152,40 @@ export const chatService = {
       provider: provider.name,
     })
 
-    if (conversation.messages?.[0]) {
-      logger.warn('active guard blocked', {
-        activeAssistantMessageId: conversation.messages[0].id,
+    let createdMessages: CreatedChatMessages
+
+    try {
+      createdMessages = await messageRepository.createChatMessagesWithActiveGuard({
+        content: input.content,
         conversationId: conversation.id,
+        mode,
+        profileId,
       })
-      throw conflict(
-        'Current conversation already has an active streaming message',
-        'CONVERSATION_STREAMING',
-      )
+    } catch (error) {
+      if (error instanceof ActiveChatStreamError) {
+        logger.warn('active guard blocked', {
+          activeAssistantMessageId: error.activeAssistantMessageId,
+          conversationId: conversation.id,
+        })
+        throw conflict(
+          'Current conversation already has an active streaming message',
+          'CONVERSATION_STREAMING',
+        )
+      }
+
+      if (error instanceof ChatMessagesConversationNotFoundError) {
+        throw notFound('Conversation not found')
+      }
+
+      if (error instanceof ChatMessagesConversationDeletedError) {
+        throw createApiError({
+          code: 'CONVERSATION_DELETED',
+          message: 'Conversation is deleted',
+          statusCode: 404,
+        })
+      }
+
+      throw error
     }
 
     logger.info('active guard passed', {
@@ -159,12 +193,7 @@ export const chatService = {
     })
 
     const streamId = toStreamId()
-    const { assistantMessage, userMessage } = await messageRepository.createChatMessages({
-      content: input.content,
-      conversationId: conversation.id,
-      mode,
-      profileId,
-    })
+    const { assistantMessage, userMessage } = createdMessages
     const userMessageDTO = toMessageDTO(userMessage)
     const initialAssistantMessageDTO = toMessageDTO(assistantMessage)
 

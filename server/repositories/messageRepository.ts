@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import type { ConversationStatus, Prisma } from '@prisma/client'
 import { prisma } from '../utils/prisma'
 
 export type ListMessagesParams = {
@@ -26,6 +26,35 @@ export type FailAssistantMessageParams = {
   messageId: string
 }
 
+type LockedConversationRow = {
+  id: string
+  status: ConversationStatus
+}
+
+export class ChatMessagesConversationNotFoundError extends Error {
+  constructor() {
+    super('Conversation not found')
+    this.name = 'ChatMessagesConversationNotFoundError'
+  }
+}
+
+export class ChatMessagesConversationDeletedError extends Error {
+  constructor() {
+    super('Conversation is deleted')
+    this.name = 'ChatMessagesConversationDeletedError'
+  }
+}
+
+export class ActiveChatStreamError extends Error {
+  activeAssistantMessageId: string
+
+  constructor(activeAssistantMessageId: string) {
+    super('Current conversation already has an active streaming message')
+    this.name = 'ActiveChatStreamError'
+    this.activeAssistantMessageId = activeAssistantMessageId
+  }
+}
+
 const includeToolCalls = {
   toolCalls: {
     orderBy: {
@@ -44,8 +73,44 @@ const hasMessage = (where: Prisma.MessageWhereInput) => {
 }
 
 export const messageRepository = {
-  async createChatMessages(params: CreateChatMessagesParams) {
+  async createChatMessagesWithActiveGuard(params: CreateChatMessagesParams) {
     return prisma.$transaction(async (tx) => {
+      const lockedConversations = await tx.$queryRaw<LockedConversationRow[]>`
+        SELECT "id", "status"
+        FROM "Conversation"
+        WHERE "id" = ${params.conversationId}
+        FOR UPDATE
+      `
+      const lockedConversation = lockedConversations[0]
+
+      if (!lockedConversation) {
+        throw new ChatMessagesConversationNotFoundError()
+      }
+
+      if (lockedConversation.status === 'deleted') {
+        throw new ChatMessagesConversationDeletedError()
+      }
+
+      const activeAssistantMessage = await tx.message.findFirst({
+        orderBy: {
+          createdAt: 'asc',
+        },
+        select: {
+          id: true,
+        },
+        where: {
+          conversationId: params.conversationId,
+          role: 'assistant',
+          status: {
+            in: ['pending', 'streaming'],
+          },
+        },
+      })
+
+      if (activeAssistantMessage) {
+        throw new ActiveChatStreamError(activeAssistantMessage.id)
+      }
+
       const lastMessage = await tx.message.findFirst({
         orderBy: {
           seq: 'desc',

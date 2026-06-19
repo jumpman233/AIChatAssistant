@@ -27,6 +27,7 @@
 V0 工程基线
 V1 会话与消息存储骨架
 V2 单会话 Mock Stream 闭环
+V2.5 V2 收尾检查与边界修复
 V2.6 豆包真实 AI Provider Spike
 V3 多会话 Streaming 运行时
 V4 停止生成与失败重试
@@ -327,11 +328,30 @@ pnpm verify:v2
 
 ---
 
+## V2.5：V2 收尾检查与边界修复
+
+### 已完成内容
+
+V2.5 只做 V2 单会话 Mock Stream 闭环的收尾检查、回归和必要边界修复，不进入 V3 / V4 / V5。
+
+完成项：
+
+* `ErrorRetryBlock` 只有 `retryable=true` 时才展示重试按钮。
+* 页面卸载统一清理 typewriter timer。
+* Markdown raw HTML 关闭。
+* fake stream / fake message 前端主链路已移除。
+* `pnpm typecheck` 通过。
+* `pnpm verify:v1` 通过。
+* `pnpm verify:v2` 通过。
+* 人工页面验证通过。
+
+---
+
 ## V2.6：豆包真实 AI Provider Spike
 
 ### 定位
 
-V2.6 位于 V2-5 收尾检查之后，用真实火山方舟 / 豆包流式接口验证当前架构，尽早暴露 Provider Adapter、历史消息、上游流解析和错误处理方面的问题。
+V2.6 位于 V2.5 收尾检查之后，用真实火山方舟 / 豆包流式接口验证当前架构，尽早暴露 Provider Adapter、历史消息、上游流解析和错误处理方面的问题。
 
 它不是完整多 Provider 产品化，不进入 V3 / V4 / V5，不改变前端内部 SSE 契约。
 
@@ -412,7 +432,7 @@ pnpm smoke:ai-provider
 
 ### 后端内容
 
-- `POST /api/chat` 增加同会话 active streaming 检查
+- 复用并验证现有同会话 active streaming guard
 - active streaming 定义：
   - `role = assistant`
   - `status in [pending, streaming]`
@@ -433,25 +453,36 @@ HTTP 状态码：
 
 - 不使用全局 streaming 锁
 - 不同 conversationId 的 `/api/chat` 请求互不影响
+- 不同 conversation 可以同时 streaming
+- 同一 conversation 只能存在一个 active assistant stream
+- A 的重复请求返回 409 时，A 原 stream 和 B stream 均不受影响
 - `GET /api/conversations` 和 `GET /api/conversations/:id` 需要根据 active assistant message 返回真实的：
   - `isStreaming`
   - `activeAssistantMessageId`
+- streaming 期间 list/detail 返回真实 `isStreaming=true` 和对应 `activeAssistantMessageId`
+- 完成后 list/detail 恢复为 `isStreaming=false` / `activeAssistantMessageId=null`
 
 ### 前端内容
 
-- `conversationStore` 管理：
+- 检查并补齐现有 `conversationStore`：
   - `activeConversationId`
   - `conversations`
   - `messagesByConversationId`
-- `chatRuntimeStore` 管理：
+- 检查并补齐现有 `chatRuntimeStore`：
   - `conversationStates`
-  - 每个 conversation 独立的 `isStreaming`
-  - 每个 conversation 独立的 `streamingMessageId`
+  - 每个 conversation 独立的 reader / request
   - 每个 conversation 独立的 `AbortController`
-  - 每个 conversation 独立的 runtime error
+  - 每个 conversation 独立的 `streamingMessageId`
+  - 每个 conversation 独立的 typewriter runtime
+  - 每个 conversation 独立的 timer
+  - 每个 conversation 独立的 error
 - 左侧会话列表能展示非当前会话的 streaming 状态
+- 左侧列表展示非当前 conversation 的 streaming 状态
 - 切换会话不清空其他会话 runtime state
-- stream event 必须更新对应 conversation，不误写到当前 active conversation
+- 切换 active conversation 不影响后台 conversation 的 stream
+- stream event 必须基于请求上下文中的 conversationId 更新数据，不能依赖当前 activeConversationId
+- 一个 conversation 结束或失败时，不能清理其他 conversation runtime
+- V3 不实现停止按钮和 abort API；`AbortController` 仅作为每个请求的 runtime 资源存在
 
 ### 人工验证步骤
 
@@ -475,13 +506,35 @@ tests/harness/scenarios/multi-stream.scenario.ts
 
 自动验证内容：
 
-1. 创建 Conversation A、Conversation B
-2. 同时调用 A 和 B 的 `POST /api/chat`
-3. 并发读取两个 stream
-4. 断言两个 stream 都能收到 `text_delta` 和 `message_done`
-5. 在 A streaming 未结束时，再次调用 A 的 `POST /api/chat`
-6. 断言返回 409，code = `CONVERSATION_STREAMING`
-7. 断言 B 不受影响
+1. 创建 Conversation A 和 B
+2. 使用带可控延迟的 Mock Provider
+3. 并发调用 A、B 的 `/api/chat`
+4. 确认两个 stream 在时间上重叠，而不是先后完成
+5. A、B 分别收到：
+   - `message_created`
+   - `text_delta`
+   - `message_done`
+6. A、B 的 `conversationId`、`streamId`、`messageId` 不串流
+7. 在 A 尚未结束时再次请求 A
+8. 断言：
+   - HTTP 409
+   - `code = CONVERSATION_STREAMING`
+9. 断言 A 原 stream 继续完成
+10. 断言 B stream 继续完成
+11. streaming 期间查询 list/detail：
+   - A、B 均 `isStreaming=true`
+   - `activeAssistantMessageId` 分别正确
+12. 完成后查询：
+   - `isStreaming=false`
+   - `activeAssistantMessageId=null`
+13. API 和数据库分别断言：
+   - A、B 内容与各自 delta 拼接一致
+   - seq 各自独立且不重复
+   - 不存在跨 conversation 消息污染
+14. `pnpm verify:v3` 必须强制：
+   - `AI_CHAT_PROVIDER=mock`
+   - 不调用真实 Ark
+   - 不产生真实 AI 费用
 
 建议命令：
 
@@ -494,7 +547,11 @@ pnpm verify:v3
 - 不做停止生成
 - 不做重试
 - 不做 ToolCall
-- 不接真实模型
+- V3 自动验证默认只使用 Mock Provider
+- 不要求 Ark 多会话并发作为验收条件
+- 不新增真实 Provider 专属并发逻辑
+- 不做跨进程分布式锁
+- 不做任务队列
 
 ---
 
@@ -581,7 +638,8 @@ pnpm verify:v4
 
 ### 不做
 
-- 不做真实模型
+- 自动 Harness 默认使用 Mock Provider
+- 不扩展真实 Provider 专属 abort / retry 行为
 - 不做复杂 ToolCall
 - 不做完整 Markdown 高亮
 
@@ -852,7 +910,9 @@ pnpm e2e:markdown
 
 ### 后端内容
 
-- mock stream 稳定
+- Mock Provider 稳定
+- Ark Provider smoke 稳定
+- Provider 切换入口和环境变量说明完整
 - 基础工具调用稳定
 - abort / retry 稳定
 - 多会话 streaming 稳定
@@ -879,7 +939,10 @@ pnpm e2e:markdown
 
 Roadmap 可以包含：
 
-- 真实模型接入
+- 更多 AI Provider
+- Responses API
+- usage / 成本统计
+- 上下文压缩
 - Go MCP Tool Service
 - 领域 Profile 扩展
 - KnowledgeSource / RAG
@@ -1000,12 +1063,8 @@ pnpm dev
 
 ## 当前优先级
 
-当前最适合从 `V0` 或 `V1` 开始。
+当前已完成 V0、V1、V2、V2.5、V2.6。
 
-如果工程基线和 Nuxt UI / Pinia / Prisma 已经完成，则直接进入：
+下一步进入 V3：多会话 Streaming 运行时。
 
-```text
-V1 会话与消息存储骨架
-```
-
-不要先做完整 UI，也不要先接真实模型。
+V3 默认使用 Mock Provider 完成稳定并发验证。

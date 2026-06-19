@@ -13,7 +13,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const forwardChatLogs = (data: Buffer | string) => {
   for (const line of String(data).split(/\r?\n/)) {
     const cleanLine = line.replace(/\u001B\[[0-9;]*m/g, '')
-    const chatLogIndex = cleanLine.indexOf('[chat]')
+    const chatLogIndex = cleanLine.search(/\[(chat|provider:[^\]]+)\]/)
 
     if (chatLogIndex >= 0) {
       console.log(cleanLine.slice(chatLogIndex))
@@ -80,6 +80,8 @@ export const startTestServer = async (env: NodeJS.ProcessEnv): Promise<TestServe
     baseUrl,
     port,
   })
+
+  await killProcessOnPort(port)
 
   const child = execa('pnpm', ['exec', 'nuxt', 'dev', '--host', '127.0.0.1', '--port', String(port)], {
     env: {

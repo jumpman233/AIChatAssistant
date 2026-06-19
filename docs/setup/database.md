@@ -57,7 +57,7 @@ CREATE DATABASE ai_chat_assistant_test;
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_chat_assistant_dev?schema=public"
 TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_chat_assistant_test?schema=public"
 NUXT_PUBLIC_APP_NAME="AIChatAssistant"
-AI_CHAT_USE_MOCK_STREAM="true"
+AI_CHAT_PROVIDER=mock
 ```
 
 `.env.example` 可以保留同样的变量名和示例值，供新开发者复制：
@@ -66,7 +66,7 @@ AI_CHAT_USE_MOCK_STREAM="true"
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_chat_assistant_dev?schema=public"
 TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_chat_assistant_test?schema=public"
 NUXT_PUBLIC_APP_NAME="AIChatAssistant"
-AI_CHAT_USE_MOCK_STREAM="true"
+AI_CHAT_PROVIDER=mock
 ```
 
 如果你的 PostgreSQL 用户、密码、端口不同，只修改连接串对应部分即可。

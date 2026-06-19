@@ -141,28 +141,35 @@ const formatMeta = (meta?: LogMeta) => {
   return parts.length > 0 ? ` ${parts.join(' ')}` : ''
 }
 
-const writeLog = (level: Exclude<LogLevel, 'silent'>, eventName: string, meta?: LogMeta) => {
+const writeLog = (
+  scope: string,
+  level: Exclude<LogLevel, 'silent'>,
+  eventName: string,
+  meta?: LogMeta,
+) => {
   if (!shouldLog(level)) {
     return
   }
 
-  console[consoleMethod[level]](`[chat] ${eventName}${formatMeta(meta)}`)
+  console[consoleMethod[level]](`[${scope}] ${eventName}${formatMeta(meta)}`)
 }
 
-export const logger = {
+export const createLogger = (scope: string) => ({
   debug(eventName: string, meta?: LogMeta) {
-    writeLog('debug', eventName, meta)
+    writeLog(scope, 'debug', eventName, meta)
   },
 
   info(eventName: string, meta?: LogMeta) {
-    writeLog('info', eventName, meta)
+    writeLog(scope, 'info', eventName, meta)
   },
 
   warn(eventName: string, meta?: LogMeta) {
-    writeLog('warn', eventName, meta)
+    writeLog(scope, 'warn', eventName, meta)
   },
 
   error(eventName: string, meta?: LogMeta) {
-    writeLog('error', eventName, meta)
+    writeLog(scope, 'error', eventName, meta)
   },
-}
+})
+
+export const logger = createLogger('chat')

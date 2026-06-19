@@ -168,6 +168,26 @@ export const messageRepository = {
     }
   },
 
+  listForConversationHistory(conversationId: string) {
+    return prisma.message.findMany({
+      orderBy: {
+        seq: 'asc',
+      },
+      select: {
+        content: true,
+        role: true,
+        seq: true,
+        status: true,
+      },
+      where: {
+        conversationId,
+        role: {
+          in: ['user', 'assistant'],
+        },
+      },
+    })
+  },
+
   updateAssistantMessageDone(params: CompleteAssistantMessageParams) {
     return prisma.message.update({
       data: {

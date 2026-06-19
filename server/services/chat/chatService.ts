@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { getChatProviderConfig } from '../../config/chatProviderConfig'
 import { getProfileById } from '../../profiles'
 import { toMessageDTO } from '../../mappers/chatMappers'
 import { conversationRepository } from '../../repositories/conversationRepository'
@@ -7,7 +8,9 @@ import { badRequest, conflict, createApiError, notFound } from '../../utils/apiE
 import { logger } from '../../utils/logger'
 import { createSseFrame } from '../../utils/sse'
 import type { CreateChatInput } from '../../validators/chat'
-import { createMockStream } from './mockStreamService'
+import { buildConversationHistory } from './conversationHistory'
+import { createChatProvider } from './providers/providerFactory'
+import { ChatProviderError } from './providers/types'
 
 type ChatStreamEvent =
   | {
@@ -45,12 +48,16 @@ const encoder = new TextEncoder()
 
 const toStreamId = () => `stream_${randomUUID()}`
 
-const getSafeStreamErrorMessage = (error: unknown) => {
+const getSafeStreamErrorMessage = (error: unknown, providerName: string) => {
+  if (error instanceof ChatProviderError) {
+    return error.message
+  }
+
   if (error instanceof Error && error.message.startsWith('Mock stream failed')) {
     return error.message
   }
 
-  return 'Mock stream failed'
+  return `${providerName} provider stream failed`
 }
 
 const createStreamWriter = (controller: ReadableStreamDefaultController<Uint8Array>) => {
@@ -99,6 +106,8 @@ const assertProfileMode = (profileId: string, mode: string) => {
   if (profile.conversationModes && !profile.conversationModes.includes(mode)) {
     throw badRequest('Invalid mode')
   }
+
+  return profile
 }
 
 export const chatService = {
@@ -126,6 +135,14 @@ export const chatService = {
       profileId,
     })
 
+    const profile = assertProfileMode(profileId, mode)
+    const providerConfig = getChatProviderConfig()
+    const provider = createChatProvider(providerConfig)
+
+    logger.info('provider selected', {
+      provider: provider.name,
+    })
+
     if (conversation.messages?.[0]) {
       logger.warn('active guard blocked', {
         activeAssistantMessageId: conversation.messages[0].id,
@@ -140,8 +157,6 @@ export const chatService = {
     logger.info('active guard passed', {
       conversationId: conversation.id,
     })
-
-    assertProfileMode(profileId, mode)
 
     const streamId = toStreamId()
     const { assistantMessage, userMessage } = await messageRepository.createChatMessages({
@@ -162,10 +177,17 @@ export const chatService = {
       userSeq: userMessage.seq,
     })
 
+    const historyMessages = await messageRepository.listForConversationHistory(conversation.id)
+    const providerMessages = buildConversationHistory({
+      messages: historyMessages,
+      systemPrompt: profile.systemPrompt,
+    })
+
     return new ReadableStream<Uint8Array>({
       async start(controller) {
         const writeEvent = createStreamWriter(controller)
         let fullContent = ''
+        let deltaIndex = 0
 
         try {
           writeEvent({
@@ -176,13 +198,20 @@ export const chatService = {
             userMessage: userMessageDTO,
           })
 
-          for await (const chunk of createMockStream(input.mock)) {
+          for await (const chunk of provider.stream({
+            messages: providerMessages,
+            mock: input.mock,
+            mode,
+            profileId,
+          })) {
+            deltaIndex += 1
             fullContent += chunk.delta
             logger.info('delta', {
               assistantMessageId: assistantMessage.id,
-              deltaIndex: chunk.index,
+              deltaIndex,
               deltaLength: chunk.delta.length,
               fullContentLength: fullContent.length,
+              provider: provider.name,
               streamId,
             })
             writeEvent({
@@ -202,6 +231,7 @@ export const chatService = {
           logger.info('assistant done', {
             contentLength: fullContent.length,
             messageId: assistantMessage.id,
+            provider: provider.name,
             streamId,
           })
 
@@ -213,7 +243,7 @@ export const chatService = {
           })
           controller.close()
         } catch (error) {
-          const errorMessage = getSafeStreamErrorMessage(error)
+          const errorMessage = getSafeStreamErrorMessage(error, provider.name)
           const failedMessage = await messageRepository.updateAssistantMessageFailed({
             content: fullContent,
             errorMessage,
@@ -225,6 +255,7 @@ export const chatService = {
             contentLength: fullContent.length,
             errorMessage,
             errorName: error instanceof Error ? error.name : 'UnknownError',
+            provider: provider.name,
             streamId,
           })
 

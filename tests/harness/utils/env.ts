@@ -30,6 +30,15 @@ export const loadHarnessEnv = (): HarnessEnv => {
 export const createHarnessProcessEnv = (env: HarnessEnv) => ({
   ...process.env,
   AI_CHAT_LOG_LEVEL: process.env.AI_CHAT_LOG_LEVEL ?? 'info',
+  AI_CHAT_PROVIDER: 'mock',
+  DATABASE_URL: env.testDatabaseUrl,
+  TEST_DATABASE_URL: env.testDatabaseUrl,
+})
+
+export const createAiProviderSmokeProcessEnv = (env: HarnessEnv) => ({
+  ...process.env,
+  AI_CHAT_LOG_LEVEL: process.env.AI_CHAT_LOG_LEVEL ?? 'info',
+  AI_CHAT_PROVIDER: 'ark',
   DATABASE_URL: env.testDatabaseUrl,
   TEST_DATABASE_URL: env.testDatabaseUrl,
 })

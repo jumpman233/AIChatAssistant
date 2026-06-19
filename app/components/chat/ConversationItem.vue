@@ -5,6 +5,7 @@ const props = defineProps<{
   conversation: ConversationDTO
   active: boolean
   disabled?: boolean
+  generating?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -29,7 +30,10 @@ const updatedLabel = computed(() => {
 <template>
   <div
     class="conversation-item"
-    :class="{ 'conversation-item--active': active }"
+    :class="{
+      'conversation-item--active': active,
+      'conversation-item--generating': generating,
+    }"
   >
     <button
       class="conversation-item__main"
@@ -40,7 +44,7 @@ const updatedLabel = computed(() => {
       <span class="conversation-item__title">{{ displayTitle }}</span>
       <span class="conversation-item__meta">
         {{ updatedLabel }}
-        <span v-if="conversation.isStreaming" class="conversation-item__streaming">
+        <span v-if="generating" class="conversation-item__streaming">
           生成中
         </span>
       </span>
@@ -81,6 +85,10 @@ const updatedLabel = computed(() => {
 
 .conversation-item--active {
   box-shadow: 0 10px 24px rgb(17 24 39 / 8%);
+}
+
+.conversation-item--generating {
+  border-color: rgb(37 99 235 / 26%);
 }
 
 .conversation-item__main {

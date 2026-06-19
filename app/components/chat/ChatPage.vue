@@ -21,15 +21,25 @@ const activeRuntime = computed(() => {
   return activeConversationId.value ? chatRuntimeStore.getRuntimeState(activeConversationId.value) : null
 })
 
+const isConversationGenerating = (conversationId: string) => {
+  return (
+    chatRuntimeStore.isConversationStreaming(conversationId) ||
+    conversationStore.isConversationStreaming(conversationId)
+  )
+}
+
+const generatingConversationIds = computed(() => {
+  return conversations.value
+    .filter((conversation) => isConversationGenerating(conversation.id))
+    .map((conversation) => conversation.id)
+})
+
 const isActiveConversationStreaming = computed(() => {
   if (!activeConversationId.value) {
     return false
   }
 
-  return (
-    chatRuntimeStore.isConversationStreaming(activeConversationId.value) ||
-    Boolean(activeConversation.value?.isStreaming)
-  )
+  return isConversationGenerating(activeConversationId.value)
 })
 
 const createConversation = async () => {
@@ -105,6 +115,7 @@ onBeforeUnmount(() => {
       :active-conversation-id="activeConversationId"
       :conversations="conversations"
       :error="error"
+      :generating-conversation-ids="generatingConversationIds"
       :pending="pending"
       @create="createConversation"
       @delete="confirmAndDeleteConversation"

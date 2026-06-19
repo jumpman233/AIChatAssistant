@@ -4,6 +4,7 @@ import type { ConversationDTO } from '~/types/chat'
 defineProps<{
   conversations: ConversationDTO[]
   activeConversationId: string | null
+  generatingConversationIds?: string[]
   pending?: boolean
   error?: string | null
 }>()
@@ -47,6 +48,7 @@ const emit = defineEmits<{
         :active="conversation.id === activeConversationId"
         :conversation="conversation"
         :disabled="pending"
+        :generating="generatingConversationIds?.includes(conversation.id)"
         @delete="emit('delete', $event)"
         @select="emit('select', $event)"
       />

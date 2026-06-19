@@ -307,6 +307,71 @@ function writeSseEvent(input: WriteSseEventInput) {
 
 ## 6. POST /api/chat 生命周期
 
+### 6.0 Provider Adapter 边界
+
+V2.6 引入真实 Ark Provider Spike 时，`POST /api/chat` 的内部调用链应保持为：
+
+```text
+POST /api/chat
+-> ChatService
+-> ProviderFactory
+-> MockChatProvider / ArkChatProvider
+-> 统一 Provider delta
+-> 项目内部 SSE
+-> 前端
+```
+
+Provider 负责：
+
+- 构造厂商请求。
+- 解析厂商流。
+- 提取普通文本 delta。
+- 将厂商错误转成统一 Provider 错误。
+- 跳过空 delta。
+- 处理上游 timeout。
+
+Provider 不负责：
+
+- 创建数据库 Message。
+- 更新 Message 状态。
+- 输出项目内部 SSE。
+- 管理前端 typewriter。
+- 渲染 Markdown。
+- 直接修改 conversation store。
+
+ChatService 负责：
+
+- 前置校验。
+- active streaming guard。
+- 创建 user message。
+- 创建 assistant message。
+- 构造 conversation history。
+- 消费统一 Provider stream。
+- 累积 fullContent。
+- 输出内部 `text_delta`。
+- done / failed 落库。
+- 输出内部 `message_done` / `message_failed`。
+
+Provider 选择只能发生在服务端，由 `AI_CHAT_PROVIDER=mock|ark` 控制。前端不得通过业务请求指定 Provider，Ark 配置不得放进 Nuxt public runtime config。
+
+无论 Provider 是 `mock` 还是 `ark`，前端看到的内部 SSE 契约保持不变：
+
+```text
+message_created
+-> text_delta...
+-> message_done
+```
+
+失败时：
+
+```text
+message_created
+-> text_delta...
+-> message_failed
+```
+
+不得把 Ark 原始 SSE 透传给前端，不得让前端解析 Ark chunk，不得为 Ark 增加前端专用分支。
+
 ### 6.1 stream 开始前
 
 后端在打开 SSE stream 前必须完成以下校验：
@@ -984,6 +1049,19 @@ GET /api/conversations/:id/messages?limit=50&beforeSeq=...&afterSeq=...
 2. 进入某个 conversation，调用 `GET /api/conversations/:id/messages?limit=50`。
 3. 用户向上滚动，使用 `beforeSeq` 拉取更早消息。
 4. 生成完成后，非发起页面可以使用 `afterSeq` 拉取新消息。
+
+### 14.1 Provider conversation history 计划
+
+真实 Provider 需要在 ChatService 中构造 conversation history，并遵守：
+
+1. 按 `seq ASC` 获取历史消息。
+2. Profile 有 system prompt 时放在最前。
+3. 只包含普通 user / assistant 消息。
+4. 只包含适合进入上下文的 done 消息。
+5. 排除空 assistant streaming message、failed assistant message、aborted assistant message、ToolCall 中间数据和空 content。
+6. 当前 user message 只传一次。
+7. 不得同时从 history 和独立 prompt 重复传递当前输入。
+8. V2.6 不实现 token 截断或摘要压缩，但保留扩展边界。
 
 ---
 

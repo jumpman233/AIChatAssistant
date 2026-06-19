@@ -42,6 +42,35 @@ Harness 场景应输出清晰阶段日志，便于开发者理解验证过程。
    * 未运行命令及原因
    * 是否通过
 
+## Harness Provider 隔离
+
+默认 Harness 必须显式使用：
+
+```env
+AI_CHAT_PROVIDER=mock
+```
+
+规则：
+
+1. `verify:v1` 必须使用 Mock Provider。
+2. `verify:v2` 必须使用 Mock Provider。
+3. 后续 `verify:mvp` 必须使用 Mock Provider。
+4. Harness 不得继承用户本地 `.env` 中的 `AI_CHAT_PROVIDER=ark`。
+5. Harness 不调用真实 Ark。
+6. Harness 不产生真实 AI 费用。
+7. Harness 不依赖网络。
+8. Harness 不要求用户手工修改 `.env`。
+9. Harness 不修改用户 `.env`。
+
+真实 Ark 只由以下命令显式触发：
+
+```bash
+pnpm dev:ark
+pnpm smoke:ai-provider
+```
+
+`pnpm smoke:ai-provider` 是独立真实 Provider smoke，不属于默认 Harness。只有用户主动运行时才允许产生真实 AI 请求和费用。
+
 ## Harness API 契约类型
 
 * Harness 中与 API 契约对应的 DTO、response、SSE event data 类型统一放在 `tests/harness/types/api.ts`。

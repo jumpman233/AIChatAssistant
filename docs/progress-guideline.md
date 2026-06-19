@@ -27,6 +27,7 @@
 V0 工程基线
 V1 会话与消息存储骨架
 V2 单会话 Mock Stream 闭环
+V2.6 豆包真实 AI Provider Spike
 V3 多会话 Streaming 运行时
 V4 停止生成与失败重试
 V5 基础 ToolCall 闭环
@@ -323,6 +324,80 @@ pnpm verify:v2
 - 不做代码复制按钮
 - 不做复杂表格优化
 - 不做 Nuxt Content / MDC 聊天消息渲染
+
+---
+
+## V2.6：豆包真实 AI Provider Spike
+
+### 定位
+
+V2.6 位于 V2-5 收尾检查之后，用真实火山方舟 / 豆包流式接口验证当前架构，尽早暴露 Provider Adapter、历史消息、上游流解析和错误处理方面的问题。
+
+它不是完整多 Provider 产品化，不进入 V3 / V4 / V5，不改变前端内部 SSE 契约。
+
+详细规则归属：
+
+* Ark 上游流解析、Provider delta 到内部 SSE 的转换、Conversation History 规则，见 `docs/architecture/streaming-protocol.md`。
+* Provider 配置、职责边界、安全和日志规则，见 `docs/rules/backend.md`。
+* Harness 强制 mock、真实 Provider smoke 隔离，见 `docs/rules/verification.md`。
+
+### 实施步骤与交付物
+
+1. 抽象统一 `ChatModelProvider`。
+2. 将现有 mock stream 收敛为 `MockChatProvider`。
+3. 新增 `ArkChatProvider`。
+4. 通过统一配置 `AI_CHAT_PROVIDER=mock|ark` 选择当前 Provider。
+5. 调用火山方舟 Chat Completions 流式接口。
+6. 将 Ark 外部 chunk 转换为统一 provider delta。
+7. 再由 chat service 转换成项目内部 SSE。
+8. 验证真实回复最终落库。
+9. 验证连续两轮对话能够携带历史上下文。
+10. 新增独立真实 Provider smoke。
+11. Mock Provider 长期保留。
+12. 默认 Harness 永远使用 Mock Provider。
+
+### 验证命令计划
+
+后续实现阶段约定增加：
+
+```bash
+pnpm dev:mock
+pnpm dev:ark
+pnpm smoke:ai-provider
+```
+
+语义：
+
+* `pnpm dev:mock`：显式以 `AI_CHAT_PROVIDER=mock` 启动开发服务，不调用真实 AI，用于普通开发和稳定调试。
+* `pnpm dev:ark`：显式以 `AI_CHAT_PROVIDER=ark` 启动开发服务，从用户本地 `.env` 读取 Ark 配置，用于人工验证真实豆包流，不得输出真实 API Key。
+* `pnpm smoke:ai-provider`：显式验证真实 Ark Provider，不属于默认 Harness，只有用户主动运行时才允许产生真实 AI 请求和费用。
+
+如果考虑 Windows、macOS 和 Linux 跨平台兼容，实现阶段可以使用 `cross-env`，但该依赖需要另行确认后再安装。
+
+### 成功标准
+
+1. `AI_CHAT_PROVIDER=mock` 时，现有 V2 mock stream 行为和 `verify:v1` / `verify:v2` 保持稳定。
+2. `AI_CHAT_PROVIDER=ark` 时，能通过真实 Ark 流式接口得到回复，并以项目内部 SSE 输出给前端。
+3. Ark 真实回复最终写入 assistant message，状态为 `done`。
+4. 连续两轮对话能携带符合规则的历史上下文。
+5. Ark 上游失败、超时或非法 chunk 能转换为安全的 `message_failed`，不泄露密钥、Authorization、完整 prompt 或完整回答。
+6. `pnpm smoke:ai-provider` 可独立验证真实 Ark Provider，且不属于默认 Harness。
+7. 默认 Harness 强制使用 Mock Provider，不调用真实 Ark，不产生真实 AI 费用。
+
+### 不做
+
+* 不做产品 UI Provider 开关。
+* 不做多个真实 Provider。
+* 不做模型选择 UI。
+* 不做 ToolCall。
+* 不做 reasoning 展示。
+* 不做 usage 持久化和计费。
+* 不做 abort / retry 正式闭环。
+* 不做复杂重试和 fallback。
+* 不做 Provider 管理后台。
+* 不做 Responses API。
+* 不修改前端内部 SSE 协议。
+* 不让默认 Harness 调用真实 AI。
 
 ---
 

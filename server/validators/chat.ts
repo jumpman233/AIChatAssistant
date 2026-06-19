@@ -11,6 +11,16 @@ export type CreateChatInput = {
   }
 }
 
+export type AbortChatInput = {
+  content: string
+  messageId: string
+}
+
+export type RetryChatInput = {
+  messageId: string
+  mock?: CreateChatInput['mock']
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -67,6 +77,16 @@ const parseMockOptions = (value: unknown): CreateChatInput['mock'] => {
   }
 }
 
+export const parseMessageId = (value: unknown) => {
+  const messageId = readString(value)
+
+  if (!messageId) {
+    throw badRequest('message id is required')
+  }
+
+  return messageId
+}
+
 export const parseCreateChatInput = (body: unknown): CreateChatInput => {
   if (!isRecord(body)) {
     throw badRequest('request body must be an object')
@@ -89,5 +109,31 @@ export const parseCreateChatInput = (body: unknown): CreateChatInput => {
     mock: parseMockOptions(body.mock),
     mode: readString(body.mode),
     profileId: readString(body.profileId),
+  }
+}
+
+export const parseAbortChatInput = (messageIdValue: unknown, body: unknown): AbortChatInput => {
+  if (!isRecord(body)) {
+    throw badRequest('request body must be an object')
+  }
+
+  if (typeof body.content !== 'string') {
+    throw badRequest('content is required')
+  }
+
+  return {
+    content: body.content,
+    messageId: parseMessageId(messageIdValue),
+  }
+}
+
+export const parseRetryChatInput = (messageIdValue: unknown, body: unknown): RetryChatInput => {
+  if (body !== undefined && body !== null && !isRecord(body)) {
+    throw badRequest('request body must be an object')
+  }
+
+  return {
+    messageId: parseMessageId(messageIdValue),
+    mock: parseMockOptions(isRecord(body) ? body.mock : undefined),
   }
 }

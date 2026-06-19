@@ -10,6 +10,7 @@ export class MockChatProvider implements ChatModelProvider {
     const mockOptions = {
       ...input.mock,
       delayMs: input.mock?.delayMs ?? this.options.streamDelayMs,
+      signal: input.signal,
     }
 
     for await (const chunk of createMockStream(mockOptions)) {

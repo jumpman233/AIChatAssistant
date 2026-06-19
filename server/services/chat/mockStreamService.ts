@@ -8,6 +8,7 @@ export type MockStreamOptions = {
   chunkCount?: number
   delayMs?: number
   failAtChunk?: number
+  signal?: AbortSignal
 }
 
 const DEFAULT_MOCK_TEXT = [
@@ -19,7 +20,36 @@ const DEFAULT_MOCK_TEXT = [
   '```',
 ].join('')
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+export const createAbortError = (message = 'Provider stream aborted') =>
+  new DOMException(message, 'AbortError')
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) {
+    throw createAbortError()
+  }
+}
+
+const delay = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError())
+      return
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(createAbortError())
+    }
+
+    signal?.addEventListener('abort', onAbort, {
+      once: true,
+    })
+  })
 
 export const splitMockText = (text: string, chunkCount = 6) => {
   const normalizedChunkCount = Math.max(1, Math.floor(chunkCount))
@@ -39,13 +69,17 @@ export async function* createMockStream(options: MockStreamOptions = {}) {
   for (const [index, delta] of chunks.entries()) {
     const chunkIndex = index + 1
 
+    throwIfAborted(options.signal)
+
     if (options.failAtChunk === chunkIndex) {
       throw new Error(`Mock stream failed at chunk ${chunkIndex}`)
     }
 
     if (options.delayMs && options.delayMs > 0) {
-      await delay(options.delayMs)
+      await delay(options.delayMs, options.signal)
     }
+
+    throwIfAborted(options.signal)
 
     yield {
       delta,

@@ -104,6 +104,14 @@ export type MessageCreatedStreamEventData = {
   assistantMessage: MessageDTO
 }
 
+export type RetryCreatedStreamEventData = {
+  type: 'retry_created'
+  streamId: string
+  conversationId: string
+  sourceAssistantMessageId: string
+  assistantMessage: MessageDTO
+}
+
 export type TextDeltaStreamEventData = {
   type: 'text_delta'
   streamId: string
@@ -148,6 +156,7 @@ export type MessageFailedStreamEventData = {
 
 export type ChatStreamEventData =
   | MessageCreatedStreamEventData
+  | RetryCreatedStreamEventData
   | TextDeltaStreamEventData
   | ToolCallCreatedStreamEventData
   | ToolCallUpdatedStreamEventData

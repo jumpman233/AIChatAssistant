@@ -430,6 +430,27 @@ pnpm smoke:ai-provider
 - 允许不同 Conversation 同时 streaming
 - 禁止同一个 Conversation 同时 streaming
 
+### 已完成内容
+
+V3 已完成多会话 Streaming 运行时闭环，完成项包括：
+
+* 不同 Conversation 可以同时 streaming。
+* 同一 Conversation 只允许一个 active assistant stream。
+* PostgreSQL conversation 行锁保证同会话 guard 与消息创建原子性。
+* A/B 的 SSE、message、runtime、typewriter 相互隔离。
+* 切换会话不影响后台生成。
+* 侧边栏显示非当前会话生成状态。
+* 当前会话生成时禁止重复发送，但不影响其他会话。
+* `verify:v3` 使用 Mock Provider 验证：
+  * A/B stream 真正重叠。
+  * streaming 中间态 list/detail。
+  * duplicate 请求返回 409。
+  * 409 不影响原 A/B stream。
+  * 最终 DTO 恢复。
+  * API/DB/content/seq/parent 隔离。
+* `dev:mock:slow` 用于人工观察多会话状态。
+* V3 人工验证通过。
+
 ### 后端内容
 
 - 复用并验证现有同会话 active streaming guard
@@ -1063,8 +1084,6 @@ pnpm dev
 
 ## 当前优先级
 
-当前已完成 V0、V1、V2、V2.5、V2.6。
+当前已完成 V0、V1、V2、V2.5、V2.6、V3。
 
-下一步进入 V3：多会话 Streaming 运行时。
-
-V3 默认使用 Mock Provider 完成稳定并发验证。
+下一步进入 V4：停止生成与失败重试。

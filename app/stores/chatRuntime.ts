@@ -206,6 +206,13 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     state.streamingMessageId = null
   }
 
+  const markStreamingConflict = (conversationId: string, error: string) => {
+    const state = ensureRuntimeState(conversationId)
+    state.abortController = null
+    state.error = error
+    state.isStreaming = true
+  }
+
   const clearRuntimeState = (conversationId: string) => {
     const state = conversationStates.value[conversationId]
 
@@ -246,6 +253,7 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     isConversationStreaming,
     isMessageStreaming,
     isMessageTyping,
+    markStreamingConflict,
     renderTick,
     startStream,
   }

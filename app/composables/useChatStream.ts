@@ -82,21 +82,28 @@ export const useChatStream = () => {
   }
 
   const sendMessage = async (input: SendMessageInput) => {
+    const requestConversationId = input.conversationId
+    const requestMode = input.mode
+    const requestProfileId = input.profileId
     const normalizedContent = input.content.trim()
 
-    if (!normalizedContent || runtimeStore.isConversationStreaming(input.conversationId)) {
+    if (
+      !normalizedContent ||
+      runtimeStore.isConversationStreaming(requestConversationId) ||
+      conversationStore.isConversationStreaming(requestConversationId)
+    ) {
       return
     }
 
     const abortController = new AbortController()
-    runtimeStore.startStream(input.conversationId, abortController)
-    conversationStore.setConversationStreaming(input.conversationId, true, null)
+    runtimeStore.startStream(requestConversationId, abortController)
+    conversationStore.setConversationStreaming(requestConversationId, true, null)
 
     const requestBody: CreateChatRequest = {
       content: normalizedContent,
-      conversationId: input.conversationId,
-      mode: input.mode,
-      profileId: input.profileId,
+      conversationId: requestConversationId,
+      mode: requestMode,
+      profileId: requestProfileId,
     }
 
     try {
@@ -112,8 +119,24 @@ export const useChatStream = () => {
 
       if (!response.ok) {
         const error = await readJsonError(response)
-        runtimeStore.failBeforeStream(input.conversationId, error.message)
-        conversationStore.setConversationStreaming(input.conversationId, false, null)
+
+        if (error.code === 'CONVERSATION_STREAMING') {
+          const activeAssistantMessageId =
+            runtimeStore.getRuntimeState(requestConversationId)?.streamingMessageId ??
+            conversationStore.getConversation(requestConversationId)?.activeAssistantMessageId ??
+            null
+
+          runtimeStore.markStreamingConflict(requestConversationId, error.message)
+          conversationStore.setConversationStreaming(
+            requestConversationId,
+            true,
+            activeAssistantMessageId,
+          )
+          return
+        }
+
+        runtimeStore.failBeforeStream(requestConversationId, error.message)
+        conversationStore.setConversationStreaming(requestConversationId, false, null)
         return
       }
 
@@ -121,10 +144,10 @@ export const useChatStream = () => {
 
       if (!contentType.includes('text/event-stream')) {
         runtimeStore.failBeforeStream(
-          input.conversationId,
+          requestConversationId,
           'Server did not return a text/event-stream response',
         )
-        conversationStore.setConversationStreaming(input.conversationId, false, null)
+        conversationStore.setConversationStreaming(requestConversationId, false, null)
         return
       }
 
@@ -137,10 +160,10 @@ export const useChatStream = () => {
       }
 
       runtimeStore.failBeforeStream(
-        input.conversationId,
+        requestConversationId,
         error instanceof Error ? error.message : 'Stream request failed',
       )
-      conversationStore.setConversationStreaming(input.conversationId, false, null)
+      conversationStore.setConversationStreaming(requestConversationId, false, null)
     }
   }
 

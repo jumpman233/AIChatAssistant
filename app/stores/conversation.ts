@@ -38,6 +38,14 @@ export const useConversationStore = defineStore('conversation', () => {
       : []
   })
 
+  const getConversation = (conversationId: string) => {
+    return conversations.value.find((conversation) => conversation.id === conversationId) ?? null
+  }
+
+  const isConversationStreaming = (conversationId: string) => {
+    return Boolean(getConversation(conversationId)?.isStreaming)
+  }
+
   const setMessages = (conversationId: string, messages: MessageDTO[]) => {
     messagesByConversationId.value = {
       ...messagesByConversationId.value,
@@ -225,7 +233,9 @@ export const useConversationStore = defineStore('conversation', () => {
     createConversation,
     deleteConversation,
     error,
+    getConversation,
     initializeConversations,
+    isConversationStreaming,
     loadConversations,
     loadMessages,
     messagesByConversationId,

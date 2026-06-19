@@ -4,6 +4,7 @@ export type ChatProviderName = 'mock' | 'ark'
 
 export type MockProviderConfig = {
   provider: 'mock'
+  streamDelayMs?: number
 }
 
 export type ArkProviderConfig = {
@@ -51,6 +52,22 @@ const readPositiveInteger = (env: NodeJS.ProcessEnv, key: string, defaultValue: 
   return value
 }
 
+const readOptionalNonNegativeInteger = (env: NodeJS.ProcessEnv, key: string) => {
+  const rawValue = env[key]?.trim()
+
+  if (!rawValue) {
+    return undefined
+  }
+
+  const value = Number(rawValue)
+
+  if (!Number.isInteger(value) || value < 0 || !Number.isFinite(value)) {
+    throw configError(`${key} must be a non-negative integer`)
+  }
+
+  return value
+}
+
 export const getChatProviderConfig = (
   env: NodeJS.ProcessEnv = process.env,
 ): ChatProviderConfig => {
@@ -63,6 +80,7 @@ export const getChatProviderConfig = (
   if (provider === 'mock') {
     return {
       provider: 'mock',
+      streamDelayMs: readOptionalNonNegativeInteger(env, 'MOCK_STREAM_DELAY_MS'),
     }
   }
 

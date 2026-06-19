@@ -177,70 +177,204 @@ const parseSseChunkWithLog = (input: {
   }
 }
 
-export const readSseStream = async (response: Response) => {
-  if (!response.body) {
-    const error = new SseParseError('SSE response body is empty', {
-      rawBuffer: '',
-    })
-    logParseFailure(error)
-    throw error
-  }
+type SseWaiter = {
+  predicate: (event: HarnessSseEvent) => boolean
+  reject: (error: Error) => void
+  resolve: (event: HarnessSseEvent) => void
+  timer: ReturnType<typeof setTimeout>
+}
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  const events: HarnessSseEvent[] = []
-  let buffer = ''
+export type SseSessionOptions = {
+  waitTimeoutMs?: number
+}
 
-  while (true) {
-    const result = await reader.read()
+const DEFAULT_WAIT_TIMEOUT_MS = 15_000
 
-    if (result.done) {
-      break
+const summarizeEventTypes = (events: HarnessSseEvent[]) =>
+  events.map((event) => event.event).join(' -> ')
+
+export class HarnessSseSession {
+  readonly done: Promise<HarnessSseEvent[]>
+  readonly events: HarnessSseEvent[] = []
+
+  private buffer = ''
+  private decoder = new TextDecoder()
+  private finished = false
+  private reader: ReadableStreamDefaultReader<Uint8Array>
+  private waiters: SseWaiter[] = []
+  private waitTimeoutMs: number
+
+  constructor(response: Response, options: SseSessionOptions = {}) {
+    if (!response.body) {
+      const error = new SseParseError('SSE response body is empty', {
+        rawBuffer: '',
+      })
+      logParseFailure(error)
+      throw error
     }
 
-    const chunk = decoder.decode(result.value, {
-      stream: true,
+    this.reader = response.body.getReader()
+    this.waitTimeoutMs = options.waitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS
+    this.done = this.readToEnd()
+  }
+
+  get isDone() {
+    return this.finished
+  }
+
+  waitFor(
+    predicate: (event: HarnessSseEvent) => boolean,
+    options: { timeoutMs?: number } = {},
+  ) {
+    const existingEvent = this.events.find(predicate)
+
+    if (existingEvent) {
+      return Promise.resolve(existingEvent)
+    }
+
+    if (this.finished) {
+      return Promise.reject(
+        new Error(`SSE stream already ended. Events: ${summarizeEventTypes(this.events)}`),
+      )
+    }
+
+    return new Promise<HarnessSseEvent>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiters = this.waiters.filter((waiter) => waiter.timer !== timer)
+        reject(
+          new Error(
+            `Timed out waiting for SSE event. Events: ${summarizeEventTypes(this.events)}`,
+          ),
+        )
+      }, options.timeoutMs ?? this.waitTimeoutMs)
+
+      this.waiters.push({
+        predicate,
+        reject,
+        resolve,
+        timer,
+      })
     })
-    buffer = parseSseChunkWithLog({
-      buffer,
+  }
+
+  async cancel() {
+    this.rejectWaiters(new Error('SSE session cancelled'))
+    await this.reader.cancel().catch(() => undefined)
+  }
+
+  private captureEvents(nextEvents: HarnessSseEvent[]) {
+    for (const event of nextEvents) {
+      this.events.push(event)
+      this.resolveMatchingWaiters(event)
+    }
+  }
+
+  private parseChunk(chunk: string) {
+    const nextEvents: HarnessSseEvent[] = []
+    this.buffer = parseSseChunkWithLog({
+      buffer: this.buffer,
       chunk,
-      events,
+      events: nextEvents,
     })
+    this.captureEvents(nextEvents)
   }
 
-  const tail = decoder.decode()
+  private parseRemainingBuffer() {
+    if (!this.buffer.trim()) {
+      return
+    }
 
-  if (tail) {
-    buffer = parseSseChunkWithLog({
-      buffer,
-      chunk: tail,
-      events,
-    })
-  }
-
-  if (buffer.trim()) {
-    const frame = parseFrame(buffer)
+    const frame = parseFrame(this.buffer)
 
     if (!frame) {
       const error = new SseParseError('SSE stream ended with an incomplete frame', {
-        rawBuffer: buffer,
+        rawBuffer: this.buffer,
       })
       logParseFailure(error)
       throw error
     }
 
     try {
-      events.push(parseEvent(frame, buffer))
+      this.captureEvents([parseEvent(frame, this.buffer)])
     } catch (error) {
       logParseFailure(error)
       throw error
     }
   }
 
-  harnessStreamLog.debug('SSE stream parsed', {
-    eventCount: events.length,
-    eventTypes: events.map((event) => event.event),
-  })
+  private async readToEnd() {
+    try {
+      while (true) {
+        const result = await this.reader.read()
 
-  return events
+        if (result.done) {
+          break
+        }
+
+        this.parseChunk(
+          this.decoder.decode(result.value, {
+            stream: true,
+          }),
+        )
+      }
+
+      const tail = this.decoder.decode()
+
+      if (tail) {
+        this.parseChunk(tail)
+      }
+
+      this.parseRemainingBuffer()
+      this.finished = true
+      this.rejectWaiters(
+        new Error(`SSE stream ended before expected event. Events: ${summarizeEventTypes(this.events)}`),
+      )
+
+      harnessStreamLog.debug('SSE stream parsed', {
+        eventCount: this.events.length,
+        eventTypes: this.events.map((event) => event.event),
+      })
+
+      return this.events
+    } catch (error) {
+      this.finished = true
+      this.rejectWaiters(error instanceof Error ? error : new Error(String(error)))
+      throw error
+    }
+  }
+
+  private rejectWaiters(error: Error) {
+    const waiters = this.waiters
+    this.waiters = []
+
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer)
+      waiter.reject(error)
+    }
+  }
+
+  private resolveMatchingWaiters(event: HarnessSseEvent) {
+    const remainingWaiters: SseWaiter[] = []
+
+    for (const waiter of this.waiters) {
+      if (waiter.predicate(event)) {
+        clearTimeout(waiter.timer)
+        waiter.resolve(event)
+        continue
+      }
+
+      remainingWaiters.push(waiter)
+    }
+
+    this.waiters = remainingWaiters
+  }
+}
+
+export const createSseSession = (response: Response, options?: SseSessionOptions) => {
+  return new HarnessSseSession(response, options)
+}
+
+export const readSseStream = async (response: Response) => {
+  const session = createSseSession(response)
+  return session.done
 }

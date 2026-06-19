@@ -32,6 +32,7 @@ export const createHarnessProcessEnv = (env: HarnessEnv) => ({
   AI_CHAT_LOG_LEVEL: process.env.AI_CHAT_LOG_LEVEL ?? 'info',
   AI_CHAT_PROVIDER: 'mock',
   DATABASE_URL: env.testDatabaseUrl,
+  MOCK_STREAM_DELAY_MS: '',
   TEST_DATABASE_URL: env.testDatabaseUrl,
 })
 

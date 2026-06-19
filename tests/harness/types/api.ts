@@ -90,6 +90,12 @@ export type ListProfilesResponse = {
   items: AssistantProfileDTO[]
 }
 
+export type ApiErrorResponse = {
+  message: string
+  code?: string
+  details?: unknown
+}
+
 export type MessageCreatedStreamEventData = {
   type: 'message_created'
   streamId: string

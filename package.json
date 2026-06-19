@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nuxt dev",
     "dev:mock": "cross-env AI_CHAT_PROVIDER=mock nuxt dev",
+    "dev:mock:slow": "cross-env AI_CHAT_PROVIDER=mock MOCK_STREAM_DELAY_MS=350 nuxt dev",
     "dev:ark": "cross-env AI_CHAT_PROVIDER=ark nuxt dev",
     "build": "nuxt build",
     "preview": "nuxt preview",
@@ -12,6 +13,7 @@
     "verify:base": "pnpm typecheck && prisma generate",
     "verify:v1": "tsx tests/harness/scenarios/conversation.scenario.ts",
     "verify:v2": "tsx tests/harness/scenarios/single-stream.scenario.ts",
+    "verify:v3": "tsx tests/harness/scenarios/multi-stream.scenario.ts",
     "smoke:ai-provider": "cross-env AI_CHAT_PROVIDER=ark tsx tests/smoke/ai-provider.smoke.ts",
     "postinstall": "nuxt prepare"
   },

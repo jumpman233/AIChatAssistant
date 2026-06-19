@@ -15,7 +15,7 @@
 * 按 `docs/progress-guideline.md` 的 V0-V9 小版本推进，每次只验证当前任务涉及的最小闭环。
 * 每个版本先用人工步骤确认行为，再把稳定的关键步骤沉淀成可复用 Harness scenario 或 E2E spec。
 * 新增验证脚本时，优先复用既有 `tests/harness/utils/` 中的 api-client、stream-client、db-assert、wait、test-data 等工具，不要为每个场景复制 fetch、stream 解析或数据库断言逻辑。
-* V2 以后涉及流式响应的验证必须复用统一 stream client，能够收集 `message_created`、`text_delta`、`tool_call_created`、`tool_call_updated`、`message_done`、`message_failed`，并支持超时和失败时输出原始片段。
+* V2 以后涉及流式响应的验证必须复用统一 stream client，能够收集 `message_created`、`retry_created`、`text_delta`、`tool_call_created`、`tool_call_updated`、`message_done`、`message_failed`，并支持超时和失败时输出原始片段。
 * 涉及数据库断言时，应同时验证 API 行为和数据库状态，尤其是 soft delete、message status、seq、ToolCall status、retry 是否创建新消息、旧消息是否保留。
 
 ## Harness 日志规范
@@ -54,13 +54,15 @@ AI_CHAT_PROVIDER=mock
 
 1. `verify:v1` 必须使用 Mock Provider。
 2. `verify:v2` 必须使用 Mock Provider。
-3. 后续 `verify:mvp` 必须使用 Mock Provider。
-4. Harness 不得继承用户本地 `.env` 中的 `AI_CHAT_PROVIDER=ark`。
-5. Harness 不调用真实 Ark。
-6. Harness 不产生真实 AI 费用。
-7. Harness 不依赖网络。
-8. Harness 不要求用户手工修改 `.env`。
-9. Harness 不修改用户 `.env`。
+3. `verify:v3` 必须使用 Mock Provider。
+4. `verify:v4` 必须使用 Mock Provider。
+5. 后续 `verify:mvp` 必须使用 Mock Provider。
+6. Harness 不得继承用户本地 `.env` 中的 `AI_CHAT_PROVIDER=ark`。
+7. Harness 不调用真实 Ark。
+8. Harness 不产生真实 AI 费用。
+9. Harness 不依赖网络。
+10. Harness 不要求用户手工修改 `.env`。
+11. Harness 不修改用户 `.env`。
 
 真实 Ark 只由以下命令显式触发：
 
@@ -171,17 +173,41 @@ pnpm smoke:ai-provider
 
 必须验证：
 
-* streaming 中调用 abort 后 message 变为 `aborted`
-* partial content 被保存
-* 已经 `done` 的 message 不能被迟到 abort 覆盖成 `aborted`
-* 原 stream completion 不能把已经 `aborted` 的 message 覆盖成 `done`
-* aborted message 可以 retry
-* failed message 可以 retry
-* done message 不可 retry
-* retry 不覆盖旧 message
-* retry 创建新的 assistant message
-* 新 message 的 `parentMessageId` 指向同一条 user message
-* retry 前如果 conversation 已有 active streaming，返回 `409 CONVERSATION_STREAMING`
+* Scenario 1：Abort + retry
+  * 启动慢 Mock stream。
+  * 等待 `message_created` 和若干 `text_delta`。
+  * 拼接当前 delta 作为 `rawContent`。
+  * 调用 abort API。
+  * 断言返回 assistant `status = aborted`。
+  * 取消本地 Harness SSE session。
+  * API / DB 断言 `status = aborted`、`content = rawContent`，且后续不变成 `done` / `failed`。
+  * 再次 abort 幂等成功，返回同一 MessageDTO。
+  * retry aborted assistant。
+  * 首事件必须是 `retry_created`。
+  * 旧 aborted 保留。
+  * 新 assistant 使用新 id、新 seq，parent 指向原 user，最终 `done`。
+* Scenario 2：Failed + retry
+  * Mock 使用 `failAtChunk`。
+  * 先收到若干 delta，再收到 `message_failed`。
+  * API / DB assistant `status = failed`，partial content 正确。
+  * retry failed assistant。
+  * 首事件必须是 `retry_created`。
+  * 旧 failed 保留。
+  * 新 assistant 最终 `done`。
+* Scenario 3：多会话隔离
+  * A abort / retry 不影响 B 正在运行的 stream。
+  * 不重复 V3 的完整多会话断言。
+* 错误场景：
+  * abort done -> `409 MESSAGE_NOT_ABORTABLE`
+  * retry done -> `409 MESSAGE_NOT_RETRYABLE`
+  * retry 时已有 active stream -> `409 CONVERSATION_STREAMING`
+  * duplicate abort aborted -> 幂等成功
+* Harness 规则：
+  * 强制 `AI_CHAT_PROVIDER=mock`
+  * 不调用 Ark
+  * 使用请求级 `delayMs` / `failAtChunk`
+  * 不依赖 `MOCK_STREAM_DELAY_MS`
+  * 复用 V3 `createSseSession`
 
 #### ToolCall API / ToolCall 流程
 
@@ -267,7 +293,7 @@ pnpm smoke:ai-provider
 * `pending` message 可以 abort
 * `done` message 不可 abort
 * `failed` message 不可 abort
-* `aborted` message 不可 abort
+* `aborted` message 重复 abort 幂等成功
 * `failed` message 可以 retry
 * `aborted` message 可以 retry
 * `done` message 不可 retry
@@ -290,6 +316,7 @@ pnpm smoke:ai-provider
   * 空行结束
 * `event` 和 `data.type` 一致性校验
 * `message_created` event
+* `retry_created` event
 * `text_delta` event
 * `tool_call_created` event
 * `tool_call_updated` event
@@ -316,7 +343,7 @@ typewriter buffer 纯逻辑可以放到 `tests/unit/`，不依赖真实数据库
 * 收到 `text_delta` 后进入 `pendingText`
 * drain 后 `displayContent` 逐步追上 `rawContent`
 * `message_done` 后加速 drain，并最终 `displayContent === rawContent`
-* abort 时 flush `displayContent` 到 `rawContent`，保证用户所见内容与 partial content 一致
+* abort 时使用已收到的 `rawContent` 作为 partial content，不使用 `displayContent`
 * retry 创建新 assistant message 时使用新的 typewriter buffer，旧 buffer 被清理
 * `normalizeStreamingMarkdown` 对未闭合 fenced code block 只影响 `renderContent`
 * `normalizeStreamingMarkdown` 不写回 message content，不改变 `rawContent` / `displayContent`

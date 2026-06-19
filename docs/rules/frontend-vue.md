@@ -330,8 +330,10 @@ useProfiles.ts
 * 按 `conversationId` 读取流式响应。
 * 根据 stream event 更新目标 conversation 下的 message 内容。
 * 管理每个 conversation 独立的 `AbortController`。
-* 停止指定 conversation / message 的生成。
-* 失败重试。
+* 处理普通发送的 `message_created`。
+* 处理 retry 流的 `retry_created`。
+* 停止指定 conversation / message 的生成，停止时提交 `rawContent`。
+* 失败 / 停止后的 retry。
 * 协调 `useConversationStore()` 和 `useChatRuntimeStore()`，但不自己持有一份全局 streaming 状态。
 
 `useProfileStore()` 负责：
@@ -381,6 +383,8 @@ type ProfileState = {
 * 不同 Conversation 可以同时存在 `isStreaming = true`。
 * 同一个 Conversation 内如果 `isStreaming = true`，输入框应禁止再次发送，或展示“当前会话正在生成中”的提示。
 * 停止按钮默认只停止当前 active Conversation 的 `streamingMessageId`。
+* `chatRuntimeStore` 保存的是客户端 `AbortController`；服务端 Provider controller 不进入前端。
+* 单个 conversation 的 stop / retry 只能清理目标 conversation runtime，不能清理其他 conversation 的 runtime。
 * 如果非当前 Conversation 正在 streaming，可以在会话列表中展示生成中状态。
 * 前端收到 stream event 时，必须根据 `messageId` 或请求上下文更新对应 Conversation，不要写入当前 active Conversation 之外的错误位置。
 

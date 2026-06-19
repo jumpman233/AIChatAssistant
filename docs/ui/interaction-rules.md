@@ -399,7 +399,7 @@ trim 后为空时禁用发送按钮
 当前 Conversation streaming 时：
 - 输入框仍可输入草稿
 - 发送按钮禁用
-- 展示 Stop 按钮
+- 如果当前页面持有本地 AbortController，则展示 Stop 按钮
 ```
 
 这样用户可以提前写下一条，但不能发送，交互更自然。
@@ -408,15 +408,36 @@ trim 后为空时禁用发送按钮
 
 ### 7.3 停止按钮
 
-当前 Conversation streaming 时展示停止按钮。
+只有同时满足以下条件时展示或启用停止按钮：
+
+```text
+当前 active conversation 正在 streaming
+有 streamingMessageId
+有当前页面本地 AbortController
+```
+
+以下状态不允许停止：
+
+* 后台 conversation。
+* 刷新后仅 DTO 显示 streaming。
+* 其他标签页发起的 stream。
+* done / failed / aborted message。
 
 用户点击停止：
 
-1. 前端调用当前 Conversation 的 `AbortController.abort()`
-2. 读取当前 assistant partial content
-3. 调用 `POST /api/messages/:id/abort`
-4. 用后端返回的 MessageDTO 覆盖本地消息
-5. MessageInput 恢复可发送状态
+1. 捕获目标 `conversationId`。
+2. 捕获 `assistantMessageId`。
+3. 捕获 typewriter state 的 `rawContent`，不得使用 `displayContent`。
+4. 设置局部 stopping 状态，防止重复点击。
+5. 调用 `POST /api/messages/:id/abort`。
+6. abort API 成功后：
+   - 取消本地 fetch / reader。
+   - 使用返回的 aborted MessageDTO 更新消息。
+   - 清理目标 conversation runtime。
+   - 不影响其他 conversation。
+7. 如果 abort 返回 `MESSAGE_NOT_ABORTABLE`：
+   - 重新加载或接受当前服务端终态。
+   - 不强制覆盖为 aborted。
 
 停止按钮只影响当前 active Conversation 的 `streamingMessageId`。
 
@@ -460,7 +481,7 @@ Assistant message 处于 `streaming` 时：
 
 - 展示已生成内容
 - 展示生成中状态，例如 cursor / loading indicator
-- 如果当前 Conversation 是 active Conversation，MessageInput 显示停止按钮
+- 如果当前 Conversation 是 active Conversation 且当前页面持有本地 AbortController，MessageInput 显示停止按钮
 - 不展示 retry
 
 ---
@@ -505,11 +526,15 @@ Assistant message 处于 `aborted` 时：
 
 用户点击 failed / aborted message 的“重试”后：
 
+- 确认目标 conversation 无 active stream
+- 调用 retry API
+- 解析 `retry_created`
 - 旧 failed / aborted message 保留
 - 新 assistant message 作为新消息展示
 - 新 assistant message 进入 `streaming`
 - 新消息完成后变为 `done`
 - 如果 retry 再次失败，新消息变成 `failed`
+- 后续 `text_delta` / `message_done` / `message_failed` 只更新目标 conversation runtime
 
 不要复用旧 message UI。
 
@@ -555,9 +580,8 @@ Assistant message 处于 `aborted` 时：
 
 * 停止 SSE 读取。
 * 停止 typewriter timer。
-* 将 `displayContent` flush 到 `rawContent`。
-* 使用 `rawContent` 作为 partial content 调用 abort API。
-* 避免用户看到的内容和数据库保存的 partial content 不一致。
+* 使用已经从 SSE 收到的 `rawContent` 作为 partial content 调用 abort API。
+* 不使用 `displayContent`，避免因为 typewriter 尚未展示完而丢失已收到的 pending text。
 
 retry 时：
 

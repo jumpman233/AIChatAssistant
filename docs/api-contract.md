@@ -602,11 +602,10 @@ type ListToolsResponse = {
 ```ts
 type AbortMessageRequest = {
   /**
-   * 前端当前已经收到并拼接的 partial content。
-   * 如果提供，后端保存该 content。
-   * 如果不提供，后端保留数据库中已有 content。
+   * 停止时前端已经从 SSE 收到并拼接的 rawContent。
+   * 允许为空字符串。
    */
-  content?: string
+  content: string
 }
 ```
 
@@ -619,11 +618,13 @@ type AbortMessageResponse = MessageDTO
 ### 规则
 
 - 只能作用于 assistant message。
-- 只有 `pending` / `streaming` 可以变成 `aborted`。
-- `done` 不能被改成 `aborted`。
-- 如果 abort 请求到达时 message 已经 `done`，以 `done` 为准。
+- 只允许当前状态为 `pending` / `streaming` 时变成 `aborted`。
+- 对已经 `aborted` 的 assistant message 重复调用时幂等成功，返回当前 MessageDTO。
+- 对 `done` / `failed` / 非 assistant message 调用时返回 `409 MESSAGE_NOT_ABORTABLE`。
+- message 不存在时按现有 not found 规范返回 `404 NOT_FOUND`。
+- abort 请求体中的 `content` 是前端收到的 `rawContent`，不是 `displayContent`。
 - abort 只影响目标 `messageId`，不影响其他 Conversation。
-- 前端调用 `AbortController.abort()` 只会中断本地读取；仍必须调用该接口修正后端状态。
+- abort 成功后返回最终 `MessageDTO`，状态为 `aborted`。
 
 ---
 
@@ -683,6 +684,13 @@ type ChatStreamEvent =
       streamId: string
       conversationId: string
       userMessage: MessageDTO
+      assistantMessage: MessageDTO
+    }
+  | {
+      type: 'retry_created'
+      streamId: string
+      conversationId: string
+      sourceAssistantMessageId: string
       assistantMessage: MessageDTO
     }
   | {
@@ -747,6 +755,10 @@ type CreateChatRequest = {
    */
   mock?: {
     delayMs?: number
+    /**
+     * 仅用于 Mock Provider / Harness。
+     * 表示在指定 chunk 位置制造 Provider failure。
+     */
     failAtChunk?: number
     triggerTools?: boolean
   }
@@ -826,9 +838,6 @@ Content-Type: application/json
 
 ```ts
 type RetryMessageRequest = {
-  profileId?: string
-  mode?: string
-
   mock?: {
     delayMs?: number
     failAtChunk?: number
@@ -846,17 +855,63 @@ HTTP/1.1 200 OK
 Content-Type: text/event-stream; charset=utf-8
 ```
 
-并使用与 `POST /api/chat` 相同的 `ChatStreamEvent`。
+并返回 retry 专用 SSE event sequence：
+
+```text
+retry_created
+-> text_delta*
+-> message_done | message_failed
+```
 
 ### 规则
 
 - 只允许 retry `failed` / `aborted` assistant message。
+- 对 `done` / `pending` / `streaming` / 非 assistant message 返回 `409 MESSAGE_NOT_RETRYABLE`。
 - 不覆盖旧 message。
 - 创建新的 assistant message。
 - 新 assistant message 的 `parentMessageId` 指向同一条 user message。
+- 不重新创建 user message。
+- retry 请求体默认不需要重新传 `conversationId`、`profileId`、`mode` 或 `content`；这些信息从原 assistant message 和其 parent user message 获取。
 - retry 前必须检查目标 conversation 是否已有 active assistant message。
 - 如果已有，返回 `409 CONVERSATION_STREAMING`。
-- retry 使用与 `POST /api/chat` 完全相同的 SSE parser 和前端处理逻辑。
+- message 不存在时按现有 not found 规范返回 `404 NOT_FOUND`。
+- retry 使用与 `POST /api/chat` 相同的 SSE frame、parser、Provider Adapter、delta 标准化和 done / failed 终态更新。
+- retry 首事件必须是 `retry_created`，不得复用普通发送的 `message_created`。
+
+### retry_created
+
+```text
+event: retry_created
+```
+
+data：
+
+```ts
+type RetryCreatedEvent = {
+  type: 'retry_created'
+  streamId: string
+  conversationId: string
+  sourceAssistantMessageId: string
+  assistantMessage: MessageDTO
+}
+```
+
+语义：
+
+- `sourceAssistantMessageId` 是被 retry 的 failed / aborted assistant。
+- `assistantMessage` 是新创建的 streaming assistant。
+- 新 assistant 的 `parentMessageId` 指向原 user message。
+- 旧 failed / aborted assistant 保留。
+- `event` 必须等于 `data.type`。
+
+### Mock 失败配置
+
+`mock.failAtChunk` 只适用于 Mock Provider / Harness：
+
+- 表示在指定 chunk 位置制造 Provider failure。
+- 允许先输出 partial `text_delta`，再失败并发送 `message_failed`。
+- 非法值按现有请求校验规范处理。
+- Ark Provider 不接收、不透传该配置。
 
 ---
 
@@ -919,6 +974,7 @@ profileStore:
 | event | 前端动作 |
 |---|---|
 | `message_created` | 插入 userMessage 和 assistantMessage；记录 streamId / streamingMessageId |
+| `retry_created` | 保留 source assistant，插入新的 assistantMessage；记录 streamId / streamingMessageId |
 | `text_delta` | 按 conversationId + messageId 追加 delta |
 | `tool_call_created` | 插入或更新对应 message 的 ToolCall |
 | `tool_call_updated` | 更新对应 message 的 ToolCall |

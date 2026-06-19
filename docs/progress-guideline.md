@@ -580,35 +580,40 @@ pnpm verify:v3
 
 ### 目标
 
-补齐聊天状态机中的 `aborted`、`failed`、`retry`。
+补齐停止生成、partial content 保存、服务端 Provider 取消、`aborted` 终态、`failed` / `aborted` retry、新 assistant message 创建、多会话隔离和 `verify:v4`。
 
-### 后端内容
+字段、错误码和 SSE event 以 `docs/api-contract.md` 为准；Provider 取消、终态竞争和 retry stream 协议以 `docs/architecture/streaming-protocol.md` 为准；状态机以 `docs/rules/chat-flow.md` 为准。
 
-- 实现：
-  - `POST /api/messages/:id/abort`
-  - `POST /api/messages/:id/retry`
-- abort 规则：
-  - 只能作用于 assistant message
-  - `pending` / `streaming` 可以变成 `aborted`
-  - `done` 不能变成 `aborted`
-  - 请求 body 如果带 `content`，保存 partial content
-- retry 规则：
-  - 只支持 `failed` / `aborted` assistant message
-  - 不覆盖旧消息
-  - 创建新的 assistant message
-  - 新 assistant message 重新进入 `streaming`
-  - 新 assistant message 的 `parentMessageId` 指向同一条 user message
-- retry 前同样检查目标 conversation 是否已有 active streaming
-- 如果已有 active streaming，返回 `409 CONVERSATION_STREAMING`
+### V4-1：后端状态机、Provider 取消与 Harness
 
-### 前端内容
+交付内容：
 
-- MessageInput 支持停止按钮
-- 停止按钮只停止当前 active conversation 的 streaming message
-- Failed message 展示错误提示和重试按钮
-- Aborted message 展示“已停止”和重试按钮
-- retry 后旧消息保留，新 assistant message 单独展示
-- `AbortController` 只保存在客户端 runtime state，不持久化、不参与 SSR 序列化
+* 服务端 active stream registry。
+* Provider `AbortSignal`。
+* `POST /api/messages/:id/abort`。
+* 条件终态更新：第一个成功落库的 `done` / `failed` / `aborted` 获胜。
+* `POST /api/messages/:id/retry`。
+* retry assistant 原子创建。
+* 独立内部 SSE event：`retry_created`。
+* Mock `failAtChunk`。
+* `verify:v4`。
+
+本步骤不实现前端停止 / 重试按钮。
+
+### V4-2：前端停止与重试交互
+
+交付内容：
+
+* 当前会话停止按钮。
+* 只允许停止存在本地 `AbortController` 的 stream。
+* 停止时提交 typewriter runtime 中的 `rawContent`，不使用 `displayContent`。
+* abort API 成功后清理本地 reader / controller。
+* failed / aborted message 展示 retry。
+* retry 流处理 `retry_created`。
+* 原 failed / aborted 消息保留。
+* 新 assistant message 单独展示。
+* 多会话人工验证。
+* V1 到 V4 回归。
 
 ### 人工验证步骤
 
@@ -657,12 +662,33 @@ tests/harness/scenarios/abort-retry.scenario.ts
 pnpm verify:v4
 ```
 
+### 成功标准
+
+1. 停止真正取消服务端 Provider。
+2. assistant 最终状态为 `aborted`。
+3. partial content 等于停止时提交的 `rawContent`。
+4. `aborted` 不会被后续 `done` / `failed` 覆盖。
+5. retry 保留旧消息并创建新 assistant。
+6. retry stream 首事件为 `retry_created`。
+7. `failed` / `aborted` 均可 retry。
+8. 不可 abort / retry 返回稳定错误码。
+9. A stop / retry 不影响 B stream。
+10. `verify:v4` 强制 Mock Provider，不调用 Ark。
+
 ### 不做
 
 - 自动 Harness 默认使用 Mock Provider
 - 不扩展真实 Provider 专属 abort / retry 行为
-- 不做复杂 ToolCall
-- 不做完整 Markdown 高亮
+- 不做刷新后的停止
+- 不做跨标签页停止
+- 不做断线恢复
+- 不做多实例 registry
+- 不做 Redis / 队列
+- 不做 ToolCall
+- 不做 Ark 自动 Harness
+- 不做复杂 retry policy
+- 不做自动重试
+- 不做 retry 次数限制和管理后台
 
 ---
 

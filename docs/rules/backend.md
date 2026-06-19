@@ -208,10 +208,72 @@ ChatService 负责：
 * 消费统一 Provider stream
 * 累积 fullContent
 * 输出内部 `text_delta`
-* done / failed 落库
+* done / failed / aborted 条件终态落库
 * 输出内部 `message_done` / `message_failed`
+* 注册和清理服务端 Provider cancellation controller
 
 无论 Provider 是 `mock` 还是 `ark`，前端内部 SSE 契约保持不变。不得把 Ark 原始 SSE 透传给前端，不得让前端解析 Ark chunk，不得为 Ark 增加前端专用分支。
+
+## Provider cancellation 规范
+
+V4 停止生成必须真正取消服务端 Provider。
+
+规则：
+
+1. Provider `stream()` 必须尊重传入的 `AbortSignal`。
+2. Mock Provider 的 delay 必须能被 signal 中断。
+3. Ark Provider 的 fetch 使用同一个 signal。
+4. 服务端通过 active stream registry 记录 `assistantMessageId -> Provider AbortController`。
+5. registry 只用于运行时取消，不替代数据库 active guard。
+6. abort API 在数据库成功转为 `aborted` 后调用对应 controller 的 `abort()`。
+7. Provider 主动取消产生的 `AbortError` 属于主动停止，不属于 provider failure。
+8. 不记录完整 partial content、prompt、assistant content 或 delta。
+
+## 终态更新 repository 规范
+
+Repository 需要提供条件终态更新能力。具体命名可在实现阶段按项目规范决定，例如：
+
+```text
+completeAssistantIfActive
+failAssistantIfActive
+abortAssistantIfActive
+```
+
+要求：
+
+* 只有当前 status 仍为 `pending` / `streaming` 时，才能写入 `done` / `failed` / `aborted`。
+* `done`、`failed`、`aborted` 之间不能互相覆盖。
+* 返回结果必须能区分：
+  * 本次成功取得终态
+  * 已经是 `aborted`
+  * 已经是 `done`
+  * 已经是 `failed`
+  * message 不存在
+* abort 已经 `aborted` 的 assistant 时幂等返回当前 MessageDTO。
+* abort `done` / `failed` / 非 assistant message 时映射为 `409 MESSAGE_NOT_ABORTABLE`。
+
+## Retry 原子创建规范
+
+Retry 创建必须在短事务中完成：
+
+```text
+锁定 conversation 行
+-> 查询 source assistant
+-> 校验 failed / aborted
+-> 校验 parent user
+-> 检查无 active assistant
+-> 分配 next seq
+-> 创建新 streaming assistant
+-> 提交
+```
+
+要求：
+
+* 复用 V3 的 conversation 行锁思想。
+* 不创建新 user。
+* 不在事务中等待 Provider。
+* retry 与普通 send 并发时，只允许一个获得 active stream。
+* retry 首个内部 SSE event 为 `retry_created`，不复用普通发送的 `message_created`。
 
 ## 后端可读日志规范
 
@@ -229,6 +291,8 @@ ChatService 负责：
    * seq 分配结果
    * SSE event 类型摘要
    * done / failed 状态落库结果
+   * abort / retry 终态转换结果
+   * provider abort requested / completed
 4. 不要打印完整 prompt、完整 assistant content、用户隐私内容或大段 delta。
 5. 对 `text_delta` 只记录：
    * delta index
@@ -249,6 +313,7 @@ ChatService 负责：
     ```
     只输出规范 Provider 名称。
 12. 禁止输出 API Key、Authorization header、完整 Base URL 查询参数、完整 prompt、完整回答或数据库连接串。
+13. abort / retry 日志允许记录 assistantMessageId、sourceAssistantMessageId、conversationId、terminal transition result、partial content length、retry streamId 和 duration；禁止记录 rawContent 本文。
 
 ## 错误返回规范
 

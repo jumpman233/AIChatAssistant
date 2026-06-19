@@ -42,6 +42,34 @@ type MessageStatus =
 * `failed`：消息生成失败。
 * `aborted`：用户主动停止生成，或请求被中断。
 
+### 2.1.1 状态转换
+
+允许转换：
+
+```text
+pending -> streaming
+pending -> done | failed | aborted
+streaming -> done | failed | aborted
+```
+
+终态：
+
+```text
+done
+failed
+aborted
+```
+
+终态之间禁止转换：
+
+```text
+done -X-> failed / aborted
+failed -X-> done / aborted
+aborted -X-> done / failed
+```
+
+所有 `done` / `failed` / `aborted` 写入都必须是条件终态更新：只有当前状态仍为 `pending` / `streaming` 时才能成功。第一个成功落库的终态获胜。
+
 ---
 
 ### 2.2 ToolCallStatus
@@ -154,6 +182,7 @@ content = 完整 assistant 输出
 ```ts id="wyb92e"
 type ChatStreamEvent =
   | { type: 'message_created'; userMessage: MessageDTO; assistantMessage: MessageDTO }
+  | { type: 'retry_created'; sourceAssistantMessageId: string; assistantMessage: MessageDTO }
   | { type: 'text_delta'; messageId: string; delta: string }
   | { type: 'tool_call_created'; toolCall: ToolCallDTO }
   | { type: 'tool_call_updated'; toolCall: ToolCallDTO }
@@ -257,6 +286,8 @@ status in [pending, streaming]
 前端使用目标 Conversation 对应的 AbortController 中断当前流式请求
 +
 调用 POST /api/messages/:id/abort 显式标记目标 assistant message 为 aborted
++
+服务端通过 active stream registry 取消对应 Provider
 ```
 
 停止生成只影响目标 assistant message。
@@ -271,19 +302,19 @@ status in [pending, streaming]
   ↓
 前端根据 activeConversationId 找到对应 ConversationRuntimeState
   ↓
-调用该 Conversation 的 AbortController.abort()
-  ↓
-前端停止读取该 Conversation 的 stream
-  ↓
-前端保留该 assistant message 当前已生成内容
+读取该 assistant message 的 rawContent
   ↓
 前端调用 POST /api/messages/:id/abort
   ↓
-请求体带上当前已生成 content
+请求体带上 rawContent，不使用 displayContent
   ↓
-后端将 assistant message 更新为 aborted
+后端先条件更新 assistant message 为 aborted
+  ↓
+服务端取消对应 Provider AbortController
   ↓
 前端用后端返回的 message 覆盖本地 message
+  ↓
+前端取消本地 fetch / reader 并清理目标 Conversation runtime
 ```
 
 ---
@@ -296,10 +327,14 @@ status in [pending, streaming]
 
 * 只能作用于 assistant message。
 * 如果 message 状态是 `streaming` 或 `pending`，可以更新为 `aborted`。
-* 如果 message 状态已经是 `done`，不能改为 `aborted`。
-* 如果请求体携带 `content`，保存该 content。
-* 如果请求体没有 `content`，保留数据库中已有 content。
-* 返回更新后的 MessageDTO。
+* 如果 message 状态已经是 `aborted`，重复 abort 幂等成功，返回当前 MessageDTO。
+* 如果 message 状态已经是 `done` 或 `failed`，不能改为 `aborted`，返回 `409 MESSAGE_NOT_ABORTABLE`。
+* 非 assistant message 不能 abort，返回 `409 MESSAGE_NOT_ABORTABLE`。
+* message 不存在返回 404。
+* 请求体携带停止时前端已收到的 `rawContent`，允许为空字符串。
+* 后端保存该 `rawContent` 作为 partial content。
+* 返回最终 MessageDTO。
+* Provider 主动取消产生的 `AbortError` 不视为 provider failure，不写 `failed`。
 
 ---
 
@@ -405,7 +440,7 @@ assistant message with status = failed
 assistant message with status = aborted
 ```
 
-如果用户对 `done` 消息点击重试，第一阶段可以不支持，或作为“重新生成”另行设计。
+不支持 `done`、`pending`、`streaming` 或非 assistant message。不可 retry 返回 `409 MESSAGE_NOT_RETRYABLE`。
 
 ---
 
@@ -426,7 +461,18 @@ assistant message with status = aborted
   ↓
 重新调用 mock stream 或真实模型
   ↓
-返回新的流式响应
+返回 retry_created
+  ↓
+返回 text_delta*
+  ↓
+返回 message_done 或 message_failed
+```
+
+retry 不允许直接执行：
+
+```text
+failed -> streaming
+aborted -> streaming
 ```
 
 ---

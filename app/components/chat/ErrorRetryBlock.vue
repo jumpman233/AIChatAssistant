@@ -1,6 +1,7 @@
 <script setup lang="ts">
 defineProps<{
   message?: string | null
+  retryable?: boolean
 }>()
 
 defineEmits<{
@@ -11,7 +12,7 @@ defineEmits<{
 <template>
   <div class="error-retry-block">
     <span>{{ message ?? '生成失败' }}</span>
-    <button type="button" @click="$emit('retry')">重试</button>
+    <button v-if="retryable" type="button" @click="$emit('retry')">重试</button>
   </div>
 </template>
 

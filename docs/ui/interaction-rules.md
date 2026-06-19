@@ -538,9 +538,9 @@ Assistant message 处于 `aborted` 时：
 
 打字机节奏建议自适应：
 
-* backlog 较小时每 tick 输出 1-2 个字符。
-* backlog 较大时每 tick 输出更多字符。
-* `message_done` 后如果 `pendingText` 仍较多，应加速 drain，避免模型已结束但 UI 长时间未追上。
+* 常规情况下每 tick 输出 1 个字符。
+* backlog 较大时每 tick 最多输出 2 个字符，不要整段或大块吐出。
+* `message_done` 后如果 `pendingText` 仍较多，应提高 tick 频率追赶，但仍保持每 tick 1-2 个字符，避免模型已结束后 UI 一坨一坨出现。
 
 打字机效果只影响 UI 展示，不改变 SSE 协议，不改变数据库最终内容。
 

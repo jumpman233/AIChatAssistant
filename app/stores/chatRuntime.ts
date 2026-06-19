@@ -7,7 +7,8 @@ import {
   flushTypewriter,
 } from '~/utils/typewriter'
 
-const DRAIN_INTERVAL_MS = 24
+const DRAIN_INTERVAL_MS = 16
+const DONE_DRAIN_INTERVAL_MS = 10
 
 const createRuntimeState = (conversationId: string): ConversationRuntimeState => ({
   abortController: null,
@@ -91,6 +92,9 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
       return
     }
 
+    const done = Boolean(doneTypewriters.value[messageId])
+    const drainIntervalMs = done ? DONE_DRAIN_INTERVAL_MS : DRAIN_INTERVAL_MS
+
     typewriter.timerId = setTimeout(() => {
       const latestState = conversationStates.value[conversationId]
       const latestTypewriter = latestState?.typewriters[messageId]
@@ -117,7 +121,7 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
       if (done) {
         removeTypewriter(conversationId, messageId)
       }
-    }, DRAIN_INTERVAL_MS)
+    }, drainIntervalMs)
   }
 
   const startStream = (conversationId: string, abortController: AbortController) => {
@@ -217,9 +221,22 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     touchRender()
   }
 
+  const clearAllRuntimeStates = () => {
+    for (const state of Object.values(conversationStates.value)) {
+      for (const typewriter of Object.values(state.typewriters)) {
+        clearTypewriterTimer(typewriter)
+      }
+    }
+
+    conversationStates.value = {}
+    doneTypewriters.value = {}
+    touchRender()
+  }
+
   return {
     appendDelta,
     attachStream,
+    clearAllRuntimeStates,
     clearRuntimeState,
     conversationStates,
     failBeforeStream,

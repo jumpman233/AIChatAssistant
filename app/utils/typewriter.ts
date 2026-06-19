@@ -32,19 +32,15 @@ export const getTypewriterDrainSize = (pendingLength: number, done = false) => {
     return 0
   }
 
-  if (done) {
-    return Math.min(pendingLength, Math.max(8, Math.ceil(pendingLength / 2)))
+  if (done && pendingLength > 1) {
+    return 2
   }
 
-  if (pendingLength > 120) {
-    return 12
+  if (pendingLength > 80) {
+    return 2
   }
 
-  if (pendingLength > 40) {
-    return 6
-  }
-
-  return Math.min(pendingLength, 2)
+  return 1
 }
 
 export const drainTypewriter = (

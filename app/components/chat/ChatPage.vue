@@ -93,6 +93,10 @@ onMounted(async () => {
   await profileStore.loadProfiles()
   await conversationStore.initializeConversations()
 })
+
+onBeforeUnmount(() => {
+  chatRuntimeStore.clearAllRuntimeStates()
+})
 </script>
 
 <template>

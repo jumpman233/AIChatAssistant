@@ -1,5 +1,6 @@
 import type { ArkProviderConfig } from '../../../config/chatProviderConfig'
 import { createLogger } from '../../../utils/logger'
+import { createStreamAbortCoordinator, type StreamAbortSource } from './streamAbortCoordinator'
 import type { ChatModelProvider, ChatProviderDelta, ChatProviderInput } from './types'
 import { ChatProviderError } from './types'
 
@@ -88,6 +89,30 @@ const isAbortError = (error: unknown) => {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+const getAbortCategory = (source: StreamAbortSource) => {
+  if (source === 'user') {
+    return 'aborted'
+  }
+
+  if (source === 'timeout') {
+    return 'timeout'
+  }
+
+  return 'network_error'
+}
+
+const getAbortMessage = (source: StreamAbortSource) => {
+  if (source === 'user') {
+    return 'Ark provider request aborted'
+  }
+
+  if (source === 'timeout') {
+    return 'Ark provider request timed out'
+  }
+
+  return 'Ark provider request failed'
+}
+
 export class ArkChatProvider implements ChatModelProvider {
   readonly name = 'ark' as const
 
@@ -95,23 +120,25 @@ export class ArkChatProvider implements ChatModelProvider {
 
   async *stream(input: ChatProviderInput): AsyncIterable<ChatProviderDelta> {
     const startedAt = Date.now()
-    const controller = new AbortController()
-    let timedOut = false
     let deltaCount = 0
     let contentLength = 0
-
-    const timeout = setTimeout(() => {
-      timedOut = true
-      controller.abort()
-    }, this.config.timeoutMs)
-
-    const abortFromInput = () => controller.abort()
-    input.signal?.addEventListener('abort', abortFromInput, {
-      once: true,
+    const coordinator = createStreamAbortCoordinator({
+      externalSignal: input.signal,
+      idleTimeoutMs: this.config.idleTimeoutMs,
     })
 
     try {
+      if (coordinator.signal.aborted && coordinator.getAbortSource() === 'user') {
+        throw new ChatProviderError({
+          category: 'aborted',
+          durationMs: Date.now() - startedAt,
+          message: 'Ark provider request aborted',
+          provider: this.name,
+        })
+      }
+
       arkLogger.info('request started', {
+        idleTimeoutMs: this.config.idleTimeoutMs,
         messageCount: input.messages.length,
         modelConfigured: true,
       })
@@ -128,8 +155,10 @@ export class ArkChatProvider implements ChatModelProvider {
           'Content-Type': 'application/json',
         },
         method: 'POST',
-        signal: controller.signal,
+        signal: coordinator.signal,
       })
+
+      coordinator.markActivity()
 
       if (!response.ok) {
         const safeBody = await response.text()
@@ -167,6 +196,10 @@ export class ArkChatProvider implements ChatModelProvider {
 
         if (result.done) {
           break
+        }
+
+        if (result.value.byteLength > 0) {
+          coordinator.markActivity()
         }
 
         buffer += decoder.decode(result.value, {
@@ -228,6 +261,8 @@ export class ArkChatProvider implements ChatModelProvider {
         })
       }
 
+      coordinator.cleanup()
+
       if (deltaCount === 0) {
         throw new ChatProviderError({
           category: 'empty_text_output',
@@ -244,18 +279,22 @@ export class ArkChatProvider implements ChatModelProvider {
         durationMs: Date.now() - startedAt,
       })
     } catch (error) {
+      const abortSource = coordinator.getAbortSource()
       const providerError =
         error instanceof ChatProviderError
           ? error
           : new ChatProviderError({
-              category: timedOut ? 'timeout' : isAbortError(error) ? 'aborted' : 'network_error',
+              category: isAbortError(error) ? getAbortCategory(abortSource) : 'network_error',
               durationMs: Date.now() - startedAt,
               hasPartialContent: contentLength > 0,
-              message: timedOut ? 'Ark provider request timed out' : 'Ark provider request failed',
+              message: isAbortError(error)
+                ? getAbortMessage(abortSource)
+                : 'Ark provider request failed',
               provider: this.name,
             })
 
       arkLogger.error('failed', {
+        abortSource,
         category: providerError.category,
         durationMs: providerError.durationMs ?? Date.now() - startedAt,
         providerCode: providerError.providerCode,
@@ -264,8 +303,7 @@ export class ArkChatProvider implements ChatModelProvider {
 
       throw providerError
     } finally {
-      clearTimeout(timeout)
-      input.signal?.removeEventListener('abort', abortFromInput)
+      coordinator.cleanup()
     }
   }
 

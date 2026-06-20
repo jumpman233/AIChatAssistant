@@ -12,7 +12,7 @@ export type ArkProviderConfig = {
   apiKey: string
   baseUrl: string
   model: string
-  timeoutMs: number
+  idleTimeoutMs: number
 }
 
 export type ChatProviderConfig = MockProviderConfig | ArkProviderConfig
@@ -87,8 +87,8 @@ export const getChatProviderConfig = (
   return {
     apiKey: readRequiredString(env, 'ARK_API_KEY'),
     baseUrl: readRequiredString(env, 'ARK_BASE_URL'),
+    idleTimeoutMs: readPositiveInteger(env, 'ARK_TIMEOUT_MS', 30_000),
     model: readRequiredString(env, 'ARK_MODEL'),
     provider: 'ark',
-    timeoutMs: readPositiveInteger(env, 'ARK_TIMEOUT_MS', 30_000),
   }
 }

@@ -1188,3 +1188,11 @@ Harness 不能为了测试绕过真实 SSE 协议。
 - RAG
 - 文件上传
 - 高风险工具
+
+---
+
+## 17. Provider Streaming Contract
+
+流式 Provider 的外部 `AbortSignal` 桥接、idle timeout、网络活动续期、取消来源分类和资源清理规则集中定义在 `docs/architecture/provider-streaming-contract.md`。
+
+内部 SSE 协议不承载上游 Provider 的原始流。Provider 仍需先按该契约安全消费上游流，再由 ChatService 转换为项目内部 `message_created` / `retry_created`、`text_delta`、`message_done` / `message_failed`。

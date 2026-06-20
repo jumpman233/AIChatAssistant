@@ -15,6 +15,7 @@
     "verify:v2": "tsx tests/harness/scenarios/single-stream.scenario.ts",
     "verify:v3": "tsx tests/harness/scenarios/multi-stream.scenario.ts",
     "verify:v4": "tsx tests/harness/scenarios/abort-retry.scenario.ts",
+    "test:unit": "tsx tests/unit/stream-abort-coordinator.test.ts && tsx tests/unit/ark-provider-timeout.test.ts",
     "smoke:ai-provider": "cross-env AI_CHAT_PROVIDER=ark tsx tests/smoke/ai-provider.smoke.ts",
     "postinstall": "nuxt prepare"
   },

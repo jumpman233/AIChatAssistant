@@ -93,11 +93,10 @@ repository 只处理数据读写，不处理模型调用、流式响应、UI 状
 
 所有工具必须通过统一 Tool Registry 注册。
 
-第一阶段允许的本地工具：
+V5 本地工具范围：
 
 * calculator
 * currentTime
-* mockWeather
 
 每个工具至少包含：
 
@@ -105,19 +104,28 @@ repository 只处理数据读写，不处理模型调用、流式响应、UI 状
 type ToolDefinition = {
   name: string
   description: string
-  inputSchema: unknown
-  source: 'local' | 'mcp'
-  execute?: (args: unknown) => Promise<unknown>
+  source: 'local'
+  validateArguments: (input: unknown) => unknown
+  execute: (args: unknown) => Promise<unknown>
 }
 ```
 
 要求：
 
 * 工具必须白名单注册
+* Router 只负责选择工具和提取 arguments，不负责 ToolCall 状态流转
+* Executor 负责：
+  * 创建 `pending`
+  * 更新 `running`
+  * 更新 `success` / `failed`
+  * 发送 `tool_call_created` / `tool_call_updated`
 * 工具参数必须校验
-* 工具执行失败时返回明确错误
-* 工具调用状态需要记录到 ToolCall
+* 工具执行失败时返回安全错误，不泄露内部实现细节
+* ToolCall 必须记录到 assistant message 上
+* V5 不接入 Ark 原生 Function Calling
 * 第一阶段禁止 shell、文件删除、任意代码执行、支付、邮件发送、日历写入等高风险工具
+
+ToolCall 生命周期、工具契约和 SSE 顺序，以 `docs/architecture/tool-call-contract.md` 为准。
 
 ## 流式响应规范
 

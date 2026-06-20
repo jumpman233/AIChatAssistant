@@ -261,6 +261,8 @@ type ToolCallDTO = {
 - DTO 使用 `arguments` / `result`。
 - 数据库字段可以是 `argumentsJson` / `resultJson`，但前端不直接感知数据库字段名。
 - ToolCall 必须关联到 assistant message。
+- `messageId` 保留为 ToolCallDTO 字段，用于表达数据库关联到哪条 assistant message。
+- V5 不新增重复含义字段；SSE 事件里的 `assistantMessageId` 是事件语义字段，不替代 ToolCallDTO 里的 `messageId`。
 
 ---
 
@@ -704,14 +706,14 @@ type ChatStreamEvent =
       type: 'tool_call_created'
       streamId: string
       conversationId: string
-      messageId: string
+      assistantMessageId: string
       toolCall: ToolCallDTO
     }
   | {
       type: 'tool_call_updated'
       streamId: string
       conversationId: string
-      messageId: string
+      assistantMessageId: string
       toolCall: ToolCallDTO
     }
   | {
@@ -798,7 +800,10 @@ Connection: keep-alive
 9. 发送 `message_created` SSE event。
 10. 开始 mock/model stream。
 11. 持续发送 `text_delta`。
-12. 如有工具调用，发送 `tool_call_created` / `tool_call_updated`。
+12. 如有工具调用，发送：
+    - `tool_call_created(pending)`
+    - `tool_call_updated(running)`
+    - `tool_call_updated(success | failed)`
 13. 正常完成后更新 assistant message 为 `done`，发送 `message_done`。
 14. stream 开始后失败时，更新 assistant message 为 `failed`，发送 `message_failed`。
 15. 关闭 stream。
@@ -859,6 +864,9 @@ Content-Type: text/event-stream; charset=utf-8
 
 ```text
 retry_created
+-> tool_call_created(pending)
+-> tool_call_updated(running)
+-> tool_call_updated(success | failed)
 -> text_delta*
 -> message_done | message_failed
 ```
@@ -912,6 +920,29 @@ type RetryCreatedEvent = {
 - 允许先输出 partial `text_delta`，再失败并发送 `message_failed`。
 - 非法值按现有请求校验规范处理。
 - Ark Provider 不接收、不透传该配置。
+
+### ToolCall SSE 规则
+
+命中工具调用时，普通发送应返回：
+
+```text
+message_created
+-> tool_call_created(pending)
+-> tool_call_updated(running)
+-> tool_call_updated(success | failed)
+-> text_delta*
+-> message_done
+```
+
+关键约束：
+
+1. `tool_call_created` 中的 `toolCall.status` 必须为 `pending`。
+2. 同一个 ToolCall id 先收到一次 `running`，再收到一次 terminal update。
+3. `streamId`、`conversationId`、`assistantMessageId` 和 `toolCall.id` 在同一轮 ToolCall 中必须保持一致。
+4. ToolCall 失败不等于 assistant message 失败；V5 工具失败仍应由 assistant 输出安全说明，并以 `message_done` 收尾。
+5. `tool_call_created` / `tool_call_updated` 的 `event` 必须等于 `data.type`。
+6. `assistantMessageId === toolCall.messageId`。
+7. `assistantMessageId` 是事件字段名，用于前端快速定位 assistant message；数据库外键名继续保持 `messageId`。
 
 ---
 
@@ -976,8 +1007,8 @@ profileStore:
 | `message_created` | 插入 userMessage 和 assistantMessage；记录 streamId / streamingMessageId |
 | `retry_created` | 保留 source assistant，插入新的 assistantMessage；记录 streamId / streamingMessageId |
 | `text_delta` | 按 conversationId + messageId 追加 delta |
-| `tool_call_created` | 插入或更新对应 message 的 ToolCall |
-| `tool_call_updated` | 更新对应 message 的 ToolCall |
+| `tool_call_created` | 在 `assistantMessageId` 对应的 assistant message 上插入 pending ToolCall |
+| `tool_call_updated` | 在 `assistantMessageId` 对应的 assistant message 上更新同一个 ToolCall |
 | `message_done` | 用后端最终 message 覆盖本地 message；清理 runtime |
 | `message_failed` | 用 failed message 覆盖本地 message；保存错误；清理 runtime |
 

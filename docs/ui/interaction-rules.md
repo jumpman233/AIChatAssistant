@@ -616,7 +616,22 @@ V2 中列表、表格、标题在 streaming 中允许有轻微跳动或短暂不
 
 ## 9. ToolCallCard 交互
 
-### 9.1 running
+ToolCall 生命周期、字段和 SSE 顺序以 `docs/architecture/tool-call-contract.md` 为准。
+
+### 9.1 pending
+
+ToolCall 状态为 `pending` 时：
+
+- 展示工具名称
+- 展示“等待执行”状态
+- 可以展示参数摘要
+- 不展示最终结果
+
+pending 很短时，UI 不要求肉眼稳定观察到，但状态和 SSE 必须真实存在。
+
+---
+
+### 9.2 running
 
 ToolCall 状态为 `running` 时：
 
@@ -629,7 +644,7 @@ ToolCall 状态为 `running` 时：
 
 ---
 
-### 9.2 success
+### 9.3 success
 
 ToolCall 状态为 `success` 时：
 
@@ -640,7 +655,7 @@ ToolCall 状态为 `success` 时：
 
 ---
 
-### 9.3 failed
+### 9.4 failed
 
 ToolCall 状态为 `failed` 时：
 
@@ -648,7 +663,18 @@ ToolCall 状态为 `failed` 时：
 - 展示失败状态
 - 展示安全错误信息
 - 不展示内部 stack trace
-- 是否导致 assistant message failed，由后端状态决定
+- V5 中工具失败不等于 assistant failed
+- assistant 仍应展示安全失败说明并以 done 收尾
+
+---
+
+### 9.5 恢复与更新规则
+
+- 按 `toolCall.id` 更新同一张 Card。
+- pending / running update 不追加重复 Card。
+- 页面刷新后从 `MessageDTO.toolCalls` 恢复最终状态。
+- 默认不展示完整 JSON。
+- 不提供 ToolCall 单独停止、确认或 retry 按钮。
 
 ---
 
@@ -900,7 +926,7 @@ Tooltip     -> UTooltip
 12. 点击停止后，消息变为 aborted，并保留 partial content。
 13. failed / aborted message 能展示重试入口。
 14. 重试不会覆盖旧消息。
-15. ToolCall running / success / failed 能清楚展示。
+15. ToolCall pending / running / success / failed 能清楚展示。
 16. 非发起生成页面能看到 Conversation 正在 streaming，但不实时同步 delta。
 17. 生成完成后，非发起页面能通过重新拉取 messages 获得最终内容。
 18. 用户阅读历史时，streaming delta 不会强制把页面拉到底部。

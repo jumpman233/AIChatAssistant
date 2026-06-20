@@ -143,7 +143,10 @@ Assistant Profile 使用代码配置，数据库中只保存 `profileId`。
 
 * `calculator`
 * `currentTime`
-* `mockWeather`
+
+当前 MVP / V5 只实现以上两个本地工具。
+
+`mockWeather` 可以保留为后续示例扩展方向，但不属于当前阶段实现范围，也不进入本阶段验收。
 
 工具要求：
 

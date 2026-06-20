@@ -101,15 +101,17 @@ flowchart TD
   Q --> R{"是否触发 ToolCall？"}
 
   R -- "否" --> S["返回 SSE: text_delta"]
-  R -- "是" --> R1["创建 ToolCall: running"]
+  R -- "是" --> R1["创建 ToolCall: pending"]
   R1 --> R2["返回 SSE: tool_call_created"]
-  R2 --> R3["执行工具"]
-  R3 --> R4{"工具是否成功？"}
-  R4 -- "成功" --> R5["更新 ToolCall: success"]
-  R4 -- "失败" --> R6["更新 ToolCall: failed"]
-  R5 --> R7["返回 SSE: tool_call_updated"]
-  R6 --> R7
-  R7 --> S
+  R2 --> R3["更新 ToolCall: running"]
+  R3 --> R4["返回 SSE: tool_call_updated(running)"]
+  R4 --> R5["执行工具"]
+  R5 --> R6{"工具是否成功？"}
+  R6 -- "成功" --> R7["更新 ToolCall: success"]
+  R6 -- "失败" --> R8["更新 ToolCall: failed"]
+  R7 --> R9["返回 SSE: tool_call_updated(terminal)"]
+  R8 --> R9
+  R9 --> S
 
   S --> T["前端按 conversationId + messageId 追加 delta"]
   T --> U{"生成是否结束？"}
@@ -334,11 +336,13 @@ sequenceDiagram
   participant FE as 前端
 
   BE->>DB: 创建 ToolCall(status = pending)
+  BE-->>FE: SSE tool_call_created
+  FE->>FE: 在对应 assistant message 上插入 ToolCallCard pending
+
   BE->>DB: 更新 ToolCall(status = running, startedAt)
   DB-->>BE: ToolCallDTO running
-
-  BE-->>FE: SSE tool_call_created
-  FE->>FE: 在对应 assistant message 上展示 ToolCallCard running
+  BE-->>FE: SSE tool_call_updated
+  FE->>FE: 更新 ToolCallCard running
 
   BE->>BE: 执行本地工具
 
@@ -354,13 +358,8 @@ sequenceDiagram
     FE->>FE: 更新 ToolCallCard failed
   end
 
-  alt 工具失败但 assistant 可继续解释
-    BE-->>FE: SSE text_delta
-    BE-->>FE: SSE message_done
-  else 工具失败导致生成无法继续
-    BE->>DB: 更新 assistant message status = failed
-    BE-->>FE: SSE message_failed
-  end
+  BE-->>FE: SSE text_delta
+  BE-->>FE: SSE message_done
 ```
 
 ---

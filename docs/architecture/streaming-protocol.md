@@ -732,81 +732,77 @@ Retry 构造 Provider history 时：
 
 ## 8. ToolCall 流程
 
-### 8.1 创建 ToolCall
+ToolCall 生命周期、工具契约和职责边界以 `docs/architecture/tool-call-contract.md` 为准。
 
-当 mock/model stream 触发工具调用时：
+本协议文档只保留流式链路需要遵守的 SSE 顺序和状态边界。
 
-1. 创建 ToolCall：
-   - `status = pending`
-2. 更新为：
-   - `status = running`
-   - `startedAt = now`
-3. 发送：
+### 8.1 事件顺序
+
+普通发送命中工具时：
 
 ```text
-event: tool_call_created
+message_created
+-> tool_call_created(pending)
+-> tool_call_updated(running)
+-> tool_call_updated(success | failed)
+-> text_delta*
+-> message_done
 ```
 
-data 包含：
+Retry 命中工具时：
+
+```text
+retry_created
+-> tool_call_created(pending)
+-> tool_call_updated(running)
+-> tool_call_updated(success | failed)
+-> text_delta*
+-> message_done
+```
+
+### 8.2 事件载荷要求
+
+`tool_call_created`：
 
 ```ts
 {
   type: 'tool_call_created',
   streamId: string,
   conversationId: string,
-  messageId: string,
-  toolCall: ToolCallDTO
+  assistantMessageId: string,
+  toolCall: ToolCallDTO // status = pending
 }
 ```
 
----
-
-### 8.2 更新 ToolCall
-
-工具执行成功：
-
-```text
-status = success
-result = 工具结果
-finishedAt = now
-```
-
-工具执行失败：
-
-```text
-status = failed
-errorMessage = 安全错误信息
-finishedAt = now
-```
-
-每次关键状态变化时发送：
-
-```text
-event: tool_call_updated
-```
-
-data 包含：
+`tool_call_updated`：
 
 ```ts
 {
   type: 'tool_call_updated',
   streamId: string,
   conversationId: string,
-  messageId: string,
-  toolCall: ToolCallDTO
+  assistantMessageId: string,
+  toolCall: ToolCallDTO // running 或 success / failed
 }
 ```
 
----
+约束：
+
+1. `tool_call_created` 只出现一次。
+2. running update 只出现一次。
+3. terminal update 只出现一次。
+4. 同一个 ToolCall 的 `streamId`、`conversationId`、`assistantMessageId`、`toolCall.id` 必须保持一致。
+5. `assistantMessageId === toolCall.messageId`。
+6. `assistantMessageId` 是 SSE 事件字段，不是 Prisma `ToolCall` 的数据库列名。
 
 ### 8.3 ToolCall 失败与 Assistant 状态
 
-第一阶段规则：
+V5 规则：
 
-- ToolCall 自身失败时，ToolCall 状态为 `failed`。
-- 是否导致 assistant message `failed`，由 `chatService` 决定。
-- 如果 assistant 可以基于工具失败继续生成解释，则 assistant message 可以最终 `done`。
-- 如果工具失败导致生成无法继续，则 assistant message 设置为 `failed`，并发送 `message_failed`。
+- ToolCall 失败只更新 ToolCall 自身为 `failed`。
+- assistant 仍输出安全失败说明。
+- assistant 通过 `text_delta* -> message_done` 收尾。
+- 工具失败不发送 `message_failed`，也不进入 assistant failed / retry 主链路。
 
 ---
 
@@ -869,8 +865,8 @@ MessageInput.vue
 | `message_created` | 插入 userMessage 和 assistantMessage；记录 streamId / streamingMessageId |
 | `retry_created` | 保留 source assistant，插入新的 assistantMessage；记录 streamId / streamingMessageId |
 | `text_delta` | 按 conversationId + messageId 追加 delta |
-| `tool_call_created` | 插入或更新对应 message 的 ToolCall |
-| `tool_call_updated` | 更新对应 message 的 ToolCall |
+| `tool_call_created` | 在 `assistantMessageId` 对应的 assistant message 上插入 pending ToolCall |
+| `tool_call_updated` | 在 `assistantMessageId` 对应的 assistant message 上更新同一个 ToolCall |
 | `message_done` | 用后端最终 message 覆盖本地 message；清理 runtime |
 | `message_failed` | 用 failed message 覆盖本地 message；保存错误；清理 runtime |
 
@@ -879,6 +875,8 @@ MessageInput.vue
 - 不要默认写入当前 active conversation。
 - 必须使用 event 中的 `conversationId`。
 - 必须使用 event 中的 `messageId` 或 `message.id`。
+- ToolCall 事件必须使用 `conversationId + assistantMessageId + toolCall.id` 定位和更新 ToolCallCard。
+- 不得因为事件字段叫 `assistantMessageId`，就假设数据库外键字段也同名。
 - 如果 event.streamId 与 runtime 中记录的 streamId 不一致，应忽略或记录异常。
 
 ---

@@ -696,50 +696,51 @@ pnpm verify:v4
 
 ### 目标
 
-跑通基础工具调用的展示与记录能力。
+跑通本地 ToolCall 的展示、执行、存储和恢复闭环。
 
 ### 后端内容
 
-- 实现 Tool Registry
+- 实现 Tool Registry、Mock Tool Router、Tool Executor
 - 实现本地工具：
   - `calculator`
   - `currentTime`
-  - `mockWeather`
-- 每个工具包含：
-  - `name`
-  - `description`
-  - `inputSchema`
-  - `source`
-  - `execute`
-- 工具参数必须校验
-- 创建和更新 ToolCall：
+- ToolCall 完整状态机：
   - `pending`
   - `running`
   - `success`
   - `failed`
-- mock stream 中可以先用规则模拟工具调用，不一定依赖真实模型判断
-- ToolCall 关联到 assistant message
+- `calculator` 使用受限数学表达式解析器：
+  - 支持 `+ - * / ^`
+  - 支持括号、小数、一元正负号和优先级
+  - 不使用 `eval`
+- `currentTime` 使用服务端当前时间，默认返回 `UTC`
+- ToolCall 关联 assistant message 并通过 `MessageDTO.toolCalls` 恢复
+- 普通发送和 retry 命中工具时都遵守统一 ToolCall 事件顺序
+- 详细 ToolCall 契约见 `docs/architecture/tool-call-contract.md`
 
 ### 前端内容
 
 - ToolCallCard 展示：
   - 工具名称
-  - running / success / failed 状态
+  - pending / running / success / failed 状态
   - 参数摘要
   - 结果或错误
 - MessageItem 能渲染 toolCalls
-- ToolCall running 时，对应 assistant message 仍视为 streaming
+- ToolCall pending / running 时，对应 assistant message 仍视为 streaming
+- 页面刷新后 ToolCallCard 可从消息数据恢复
 
 ### 人工验证步骤
 
-1. 输入“现在几点，顺便算一下 599 * 3”
-2. 后端模拟触发：
-   - `currentTime`
-   - `calculator`
-3. 前端展示 ToolCallCard running
-4. 工具完成后展示 success
-5. 数据库中存在 ToolCall 记录
-6. 制造一个工具失败，前端展示 failed ToolCallCard
+1. 输入“计算 (599 * 3 + 12.5) / 2”
+2. 确认收到 ToolCall：
+   - pending
+   - running
+   - success
+3. assistant 最终输出格式化计算结果
+4. 刷新页面后 ToolCallCard 仍可恢复
+5. 输入“当前时间”
+6. 确认 `currentTime` ToolCall 成功
+7. 制造一个 calculator 失败场景，确认 ToolCall failed 但 assistant 仍 done
 
 ### 可沉淀 Harness 场景
 
@@ -752,15 +753,21 @@ tests/harness/scenarios/tool-call.scenario.ts
 自动验证内容：
 
 1. 创建 conversation
-2. 发送触发 tool call 的 mock prompt
-3. 读取 stream event
-4. 断言收到 tool call 相关事件，或在 message 完成后查询到 ToolCall
-5. 断言存在：
-   - `calculator` success
-   - `currentTime` success
-6. 制造工具失败
+2. 发送复杂 calculator prompt
+3. 断言事件顺序：
+   - `message_created`
+   - `tool_call_created(pending)`
+   - `tool_call_updated(running)`
+   - `tool_call_updated(success)`
+   - `text_delta+`
+   - `message_done`
+4. 断言 `calculator` result 正确
+5. 断言 `currentTime` success
+6. 制造 calculator failed
 7. 断言 ToolCall status = failed，errorMessage 存在
-8. 断言工具失败不会破坏消息状态规则
+8. 断言工具失败不会触发 `message_failed`
+9. 断言 assistant 仍以 `done` 收尾
+10. 断言 API / SSE / DB ToolCall 一致
 
 建议命令：
 
@@ -773,6 +780,8 @@ pnpm verify:v5
 - 不做真实 MCP
 - 不做高风险工具
 - 不做任意工具执行接口
+- 不做 `mockWeather`
+- 不做 Ark 原生 Function Calling
 - 不做文件、邮件、日历、支付等写操作
 
 ---

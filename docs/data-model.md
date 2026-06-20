@@ -537,18 +537,23 @@ type ToolCall = {
 
 一条 assistant message 可以有多次工具调用。
 
+约束：
+
+* Prisma 外键字段名保持为 `messageId`。
+* `ToolCall.messageId` 必须指向 assistant `Message.id`。
+* 不要因为 SSE 事件使用 `assistantMessageId`，就把数据库外键误认为同名字段。
+
 ---
 
 #### toolName
 
 工具名称。
 
-第一阶段允许：
+V5 计划实现的本地工具：
 
 ```text
 calculator
 currentTime
-mockWeather
 ```
 
 后续可以扩展 MCP 工具名称，例如：
@@ -608,6 +613,13 @@ pending -> running -> success
 pending -> running -> failed
 ```
 
+约束：
+
+* ToolCall 创建时必须是 `pending`。
+* 只有 `pending` 可以进入 `running`。
+* 只有 `running` 可以进入 `success` / `failed`。
+* `success` / `failed` 之间不能互相覆盖。
+
 ---
 
 #### errorMessage
@@ -622,14 +634,31 @@ pending -> running -> failed
 
 工具执行开始和结束时间。
 
-用于展示工具执行过程，也方便后续 debug。
+规则：
+
+* `startedAt` 在进入 `running` 时记录。
+* `finishedAt` 在进入 `success` / `failed` 时记录。
+* `pending` 不要求存在 `startedAt`。
+* `success` / `failed` 应存在 `finishedAt`。
+
+这些字段既用于 UI 展示，也方便后续 debug。
 
 ---
 
 ### 7.3 设计说明
 
+ToolCall 生命周期、SSE 事件顺序、工具契约和职责边界，以 `docs/architecture/tool-call-contract.md` 为准。
+
 所有工具必须通过 Tool Registry 注册。
 不要绕过 Tool Registry 直接执行工具。
+
+ToolCall 必须关联 assistant message，但不创建独立的 Conversation seq。
+普通消息在 `MessageDTO` 中返回 `toolCalls: []`，带工具调用的 assistant message 返回对应 ToolCall 数组。
+SSE 中的 `assistantMessageId` 是事件定位字段，语义上必须满足：
+
+```text
+assistantMessageId === toolCall.messageId
+```
 
 第一阶段禁止高风险工具，包括但不限于：
 

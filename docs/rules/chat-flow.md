@@ -184,8 +184,8 @@ type ChatStreamEvent =
   | { type: 'message_created'; userMessage: MessageDTO; assistantMessage: MessageDTO }
   | { type: 'retry_created'; sourceAssistantMessageId: string; assistantMessage: MessageDTO }
   | { type: 'text_delta'; messageId: string; delta: string }
-  | { type: 'tool_call_created'; toolCall: ToolCallDTO }
-  | { type: 'tool_call_updated'; toolCall: ToolCallDTO }
+  | { type: 'tool_call_created'; assistantMessageId: string; toolCall: ToolCallDTO }
+  | { type: 'tool_call_updated'; assistantMessageId: string; toolCall: ToolCallDTO }
   | { type: 'message_done'; message: MessageDTO }
   | { type: 'message_failed'; message: MessageDTO; error: { message: string; code?: string } }
 ```
@@ -560,44 +560,27 @@ Conversation B:
 
 ## 9. ToolCall 规则
 
-### 9.1 工具调用创建
+ToolCall 生命周期、SSE 顺序和工具契约以 `docs/architecture/tool-call-contract.md` 为准。
 
-当模型触发工具调用时：
+本状态机文档只强调聊天主链路必须遵守的规则。
+
+### 9.1 ToolCall 状态流转
+
+V5 ToolCall 必须真实经过：
 
 ```text id="d7d4l7"
-创建 ToolCall
-status = pending
-source = local 或 mcp
-toolName = 工具名称
-argumentsJson = 模型给出的参数
+pending -> running -> success
+pending -> running -> failed
 ```
 
-执行前：
+约束：
 
-```text id="7xz1xf"
-status = running
-startedAt = 当前时间
-```
+* ToolCall 创建时必须为 `pending`。
+* 执行器接管后更新为 `running`。
+* 只有 `running` 可以进入 `success` / `failed`。
+* `success` / `failed` 之间不能互相覆盖。
 
-执行成功：
-
-```text id="bp1zsm"
-status = success
-resultJson = 工具结果
-finishedAt = 当前时间
-```
-
-执行失败：
-
-```text id="kp9m70"
-status = failed
-errorMessage = 安全错误信息
-finishedAt = 当前时间
-```
-
----
-
-### 9.2 工具调用和 Assistant Message 的关系
+### 9.2 ToolCall 与 Assistant Message
 
 ToolCall 必须关联到 assistant message。
 
@@ -606,18 +589,17 @@ assistant message 1 ─── N tool call
 ```
 
 第一阶段不要求创建单独的 `tool` role message。
-工具过程主要通过 ToolCall 记录和前端 ToolCallCard 展示。
+工具过程主要通过 ToolCall 和 ToolCallCard 展示。
+一条 assistant message 可以关联多个 ToolCall，但 V5 每轮最多一个。
 
----
+### 9.3 ToolCall 失败不等于 Assistant 失败
 
-### 9.3 工具调用失败是否导致 Assistant 失败
+V5 规则：
 
-第一阶段推荐规则：
-
-* 工具自身失败时，ToolCall 状态为 `failed`。
-* 是否导致 assistant message 失败，由 chatService 决定。
-* 如果模型可以基于工具失败生成解释，则 assistant message 仍可以 `done`。
-* 如果工具失败导致整个生成无法继续，则 assistant message 设置为 `failed`。
+* ToolCall 自身失败时，ToolCall 状态为 `failed`。
+* assistant 输出安全失败说明。
+* assistant 最终状态仍为 `done`。
+* 工具失败不发送 `message_failed`，也不进入 V4 的 assistant failed / retry 主链路。
 
 ---
 

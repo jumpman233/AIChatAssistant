@@ -2,10 +2,16 @@
 import type { MessageDTO } from '~/types/chat'
 
 const props = defineProps<{
+  canRetry?: boolean
   message: MessageDTO
   displayContent?: string | null
   isStreaming?: boolean
   isTyping?: boolean
+  retrying?: boolean
+}>()
+
+const emit = defineEmits<{
+  retry: [message: MessageDTO]
 }>()
 
 const roleLabel = computed(() => {
@@ -27,6 +33,14 @@ const visibleContent = computed(() => {
 const shouldRenderAsStreaming = computed(() => {
   return Boolean(props.isStreaming || props.isTyping || props.message.status === 'streaming')
 })
+
+const statusMessage = computed(() => {
+  if (props.message.status === 'aborted') {
+    return 'Stopped'
+  }
+
+  return props.message.errorMessage ?? 'Generation failed'
+})
 </script>
 
 <template>
@@ -47,8 +61,11 @@ const shouldRenderAsStreaming = computed(() => {
     </div>
 
     <ErrorRetryBlock
-      v-if="message.status === 'failed'"
-      :message="message.errorMessage"
+      v-if="message.status === 'failed' || message.status === 'aborted'"
+      :disabled="retrying"
+      :message="statusMessage"
+      :retryable="canRetry"
+      @retry="emit('retry', message)"
     />
 
     <div v-if="message.status === 'aborted'" class="message__aborted">

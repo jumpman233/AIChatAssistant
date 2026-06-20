@@ -1,5 +1,6 @@
 <script setup lang="ts">
 defineProps<{
+  disabled?: boolean
   message?: string | null
   retryable?: boolean
 }>()
@@ -11,8 +12,10 @@ defineEmits<{
 
 <template>
   <div class="error-retry-block">
-    <span>{{ message ?? '生成失败' }}</span>
-    <button v-if="retryable" type="button" @click="$emit('retry')">重试</button>
+    <span>{{ message ?? 'Generation did not complete' }}</span>
+    <button v-if="retryable" :disabled="disabled" type="button" @click="$emit('retry')">
+      {{ disabled ? 'Retrying...' : 'Retry' }}
+    </button>
   </div>
 </template>
 
@@ -36,5 +39,10 @@ button {
   background: transparent;
   color: inherit;
   padding: 6px 10px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 </style>

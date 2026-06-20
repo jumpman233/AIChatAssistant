@@ -9,10 +9,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   createConversation: []
+  retry: [message: MessageDTO]
 }>()
 
 const listEl = ref<HTMLElement | null>(null)
 const chatRuntimeStore = useChatRuntimeStore()
+const conversationStore = useConversationStore()
 
 const sortedMessages = computed(() => {
   return [...props.messages].sort((a, b) => a.seq - b.seq)
@@ -39,6 +41,22 @@ const scrollToBottom = async (force = false) => {
   if (listEl.value) {
     listEl.value.scrollTop = listEl.value.scrollHeight
   }
+}
+
+const isConversationGenerating = (conversationId: string) => {
+  return (
+    chatRuntimeStore.isConversationStreaming(conversationId) ||
+    conversationStore.isConversationStreaming(conversationId)
+  )
+}
+
+const canRetryMessage = (message: MessageDTO) => {
+  return (
+    message.role === 'assistant' &&
+    (message.status === 'failed' || message.status === 'aborted') &&
+    !isConversationGenerating(message.conversationId) &&
+    !chatRuntimeStore.isMessageRetrying(message.conversationId, message.id)
+  )
 }
 
 watch(
@@ -89,10 +107,13 @@ watch(
       <MessageItem
         v-for="message in sortedMessages"
         :key="message.id"
+        :can-retry="canRetryMessage(message)"
         :display-content="chatRuntimeStore.getTypewriter(message.id)?.displayContent"
         :is-streaming="chatRuntimeStore.isMessageStreaming(message.conversationId, message.id)"
         :is-typing="chatRuntimeStore.isMessageTyping(message.id)"
         :message="message"
+        :retrying="chatRuntimeStore.isMessageRetrying(message.conversationId, message.id)"
+        @retry="emit('retry', $event)"
       />
     </div>
   </div>

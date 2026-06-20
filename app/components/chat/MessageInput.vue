@@ -1,13 +1,16 @@
 <script setup lang="ts">
 const props = defineProps<{
+  canStop?: boolean
   disabled?: boolean
   pending?: boolean
   reason?: string | null
+  stopping?: boolean
   streaming?: boolean
 }>()
 
 const emit = defineEmits<{
   send: [content: string]
+  stop: []
 }>()
 
 const draft = ref('')
@@ -27,6 +30,8 @@ const helperText = computed(() => {
 
   return 'Enter 发送，Shift + Enter 换行。'
 })
+
+const stopLabel = computed(() => (props.stopping ? 'Stopping...' : 'Stop'))
 
 const submit = () => {
   if (!canSend.value) {
@@ -60,6 +65,16 @@ const handleKeydown = (event: KeyboardEvent) => {
     <div class="message-input__footer">
       <span>{{ helperText }}</span>
       <button
+        v-if="canStop"
+        class="message-input__stop"
+        :disabled="stopping"
+        type="button"
+        @click="emit('stop')"
+      >
+        {{ stopLabel }}
+      </button>
+      <button
+        v-else
         :disabled="!canSend"
         type="button"
         @click="submit"
@@ -123,6 +138,14 @@ button:disabled {
 
 button:hover:not(:disabled) {
   background: #1f2937;
+}
+
+.message-input__stop {
+  background: #b42318;
+}
+
+.message-input__stop:hover:not(:disabled) {
+  background: #9f1f16;
 }
 
 @media (max-width: 640px) {

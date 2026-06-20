@@ -15,6 +15,8 @@ const createRuntimeState = (conversationId: string): ConversationRuntimeState =>
   conversationId,
   error: null,
   isStreaming: false,
+  isStopping: false,
+  retryingMessageIds: {},
   streamId: null,
   streamingMessageId: null,
   typewriters: {},
@@ -55,9 +57,28 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     return Boolean(conversationStates.value[conversationId]?.isStreaming)
   }
 
+  const isConversationStopping = (conversationId: string) => {
+    return Boolean(conversationStates.value[conversationId]?.isStopping)
+  }
+
+  const canStopConversation = (conversationId: string) => {
+    const state = conversationStates.value[conversationId]
+
+    return Boolean(
+      state?.isStreaming &&
+        state.streamingMessageId &&
+        state.abortController &&
+        !state.isStopping,
+    )
+  }
+
   const isMessageStreaming = (conversationId: string, messageId: string) => {
     const state = conversationStates.value[conversationId]
     return Boolean(state?.isStreaming && state.streamingMessageId === messageId)
+  }
+
+  const isMessageRetrying = (conversationId: string, messageId: string) => {
+    return Boolean(conversationStates.value[conversationId]?.retryingMessageIds[messageId])
   }
 
   const touchRender = () => {
@@ -129,8 +150,38 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     state.abortController = abortController
     state.error = null
     state.isStreaming = true
+    state.isStopping = false
     state.streamId = null
     state.streamingMessageId = null
+  }
+
+  const setStopping = (conversationId: string, isStopping: boolean) => {
+    const state = ensureRuntimeState(conversationId)
+    state.isStopping = isStopping
+  }
+
+  const setRuntimeError = (conversationId: string, error: string | null) => {
+    const state = ensureRuntimeState(conversationId)
+    state.error = error
+  }
+
+  const setMessageRetrying = (
+    conversationId: string,
+    messageId: string,
+    isRetrying: boolean,
+  ) => {
+    const state = ensureRuntimeState(conversationId)
+
+    if (isRetrying) {
+      state.retryingMessageIds[messageId] = true
+    } else {
+      delete state.retryingMessageIds[messageId]
+    }
+  }
+
+  const abortLocalStream = (conversationId: string) => {
+    const state = conversationStates.value[conversationId]
+    state?.abortController?.abort()
   }
 
   const attachStream = (input: {
@@ -189,6 +240,7 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     state.abortController = null
     state.error = input.error ?? null
     state.isStreaming = false
+    state.isStopping = false
     state.streamId = null
     state.streamingMessageId = null
     syncFinalContent(input.conversationId, input.messageId, input.finalContent)
@@ -197,11 +249,41 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     scheduleDrain(input.conversationId, input.messageId)
   }
 
+  const finishAbortedStream = (input: {
+    conversationId: string
+    messageId: string
+    finalContent: string
+  }) => {
+    const state = ensureRuntimeState(input.conversationId)
+    state.abortController = null
+    state.error = null
+    state.isStreaming = false
+    state.isStopping = false
+    state.streamId = null
+    state.streamingMessageId = null
+
+    const existingTypewriter = state.typewriters[input.messageId]
+
+    if (existingTypewriter) {
+      clearTypewriterTimer(existingTypewriter)
+    }
+
+    state.typewriters[input.messageId] = {
+      ...createTypewriterState(input.messageId, input.finalContent),
+      displayContent: input.finalContent,
+      pendingText: '',
+      rawContent: input.finalContent,
+    }
+    delete doneTypewriters.value[input.messageId]
+    touchRender()
+  }
+
   const failBeforeStream = (conversationId: string, error: string) => {
     const state = ensureRuntimeState(conversationId)
     state.abortController = null
     state.error = error
     state.isStreaming = false
+    state.isStopping = false
     state.streamId = null
     state.streamingMessageId = null
   }
@@ -211,6 +293,7 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
     state.abortController = null
     state.error = error
     state.isStreaming = true
+    state.isStopping = false
   }
 
   const clearRuntimeState = (conversationId: string) => {
@@ -242,19 +325,27 @@ export const useChatRuntimeStore = defineStore('chatRuntime', () => {
 
   return {
     appendDelta,
+    abortLocalStream,
     attachStream,
+    canStopConversation,
     clearAllRuntimeStates,
     clearRuntimeState,
     conversationStates,
+    finishAbortedStream,
     failBeforeStream,
     finishStream,
     getRuntimeState,
     getTypewriter,
+    isConversationStopping,
     isConversationStreaming,
     isMessageStreaming,
+    isMessageRetrying,
     isMessageTyping,
     markStreamingConflict,
     renderTick,
+    setMessageRetrying,
+    setRuntimeError,
+    setStopping,
     startStream,
   }
 })

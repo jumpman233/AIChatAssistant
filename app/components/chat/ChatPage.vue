@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import type { MessageDTO } from '~/types/chat'
 
 const conversationStore = useConversationStore()
 const profileStore = useProfileStore()
 const chatRuntimeStore = useChatRuntimeStore()
-const { sendMessage } = useChatStream()
+const { retryMessage, sendMessage, stopGeneration } = useChatStream()
 
 const { currentProfile, currentProfileId } = storeToRefs(profileStore)
 const {
@@ -40,6 +41,18 @@ const isActiveConversationStreaming = computed(() => {
   }
 
   return isConversationGenerating(activeConversationId.value)
+})
+
+const canStopActiveConversation = computed(() => {
+  return activeConversationId.value
+    ? chatRuntimeStore.canStopConversation(activeConversationId.value)
+    : false
+})
+
+const isActiveConversationStopping = computed(() => {
+  return activeConversationId.value
+    ? chatRuntimeStore.isConversationStopping(activeConversationId.value)
+    : false
 })
 
 const createConversation = async () => {
@@ -99,6 +112,20 @@ const handleSendMessage = async (content: string) => {
   })
 }
 
+const handleStopGeneration = async () => {
+  if (!activeConversationId.value) {
+    return
+  }
+
+  await stopGeneration(activeConversationId.value)
+}
+
+const handleRetryMessage = async (message: MessageDTO) => {
+  await retryMessage({
+    message,
+  })
+}
+
 onMounted(async () => {
   await profileStore.loadProfiles()
   await conversationStore.initializeConversations()
@@ -135,14 +162,18 @@ onBeforeUnmount(() => {
         :loading="messagesPending"
         :messages="activeMessages"
         @create-conversation="createConversation"
+        @retry="handleRetryMessage"
       />
 
       <MessageInput
+        :can-stop="canStopActiveConversation"
         :disabled="!activeConversation"
         :pending="pending"
         :reason="inputReason"
+        :stopping="isActiveConversationStopping"
         :streaming="isActiveConversationStreaming"
         @send="handleSendMessage"
+        @stop="handleStopGeneration"
       />
     </section>
   </main>

@@ -57,9 +57,11 @@ export type ConversationRuntimeState = {
   conversationId: string
   streamId: string | null
   isStreaming: boolean
+  isStopping: boolean
   streamingMessageId: string | null
   abortController: AbortController | null
   error: string | null
+  retryingMessageIds: Record<string, boolean>
   typewriters: Record<string, TypewriterRuntimeState>
 }
 
@@ -81,6 +83,18 @@ export type CreateChatRequest = {
   profileId?: string
   mode?: string
   content: string
+  mock?: {
+    delayMs?: number
+    failAtChunk?: number
+    triggerTools?: boolean
+  }
+}
+
+export type AbortMessageRequest = {
+  content: string
+}
+
+export type RetryMessageRequest = {
   mock?: {
     delayMs?: number
     failAtChunk?: number
